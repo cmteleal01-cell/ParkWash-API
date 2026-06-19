@@ -1,0 +1,40 @@
+﻿name: Backup Database
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Download database from Render
+        run: |
+          python scripts/backup.py download
+      
+      - name: Commit and push backup
+        run: |
+          git config --local user.email "backup@github.com"
+          git config --local user.name "Backup Bot"
+          
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            git add backups/
+            git commit -m "Backup database - "
+            git push origin main
+          fi
+        
+        continue-on-error: true
