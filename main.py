@@ -1,11 +1,11 @@
 ﻿import os
-import psycopg2
+import sqlite3
 from flask import Flask, jsonify, request
 import uuid
 import hashlib
 
 # Configuração
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://parkwash_user:xZkA1SWUYuwYUOZZMhfkGVVRdGYGI9JF@dpg-d8qj6rkvikkc73b18e6g-a/parkwash")
+DATABASE_FILE = "parkwash.db"
 
 app = Flask(__name__)
 
@@ -16,19 +16,19 @@ app = Flask(__name__)
 def init_database():
     """Cria as tabelas se não existirem"""
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_FILE)
         cur = conn.cursor()
         
         # Tabela de máquinas licenciadas
         cur.execute("""
             CREATE TABLE IF NOT EXISTS machines (
-                id SERIAL PRIMARY KEY,
-                mac_address VARCHAR(17) UNIQUE NOT NULL,
-                license_key VARCHAR(64) UNIQUE NOT NULL,
-                active BOOLEAN DEFAULT TRUE,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mac_address TEXT UNIQUE NOT NULL,
+                license_key TEXT UNIQUE NOT NULL,
+                active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                client_name VARCHAR(255),
+                client_name TEXT,
                 notes TEXT
             )
         """)
@@ -36,23 +36,23 @@ def init_database():
         # Tabela de versões
         cur.execute("""
             CREATE TABLE IF NOT EXISTS versions (
-                id SERIAL PRIMARY KEY,
-                version_number VARCHAR(10) UNIQUE NOT NULL,
-                download_url VARCHAR(512) NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version_number TEXT UNIQUE NOT NULL,
+                download_url TEXT NOT NULL,
                 changelog TEXT,
                 released_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active INTEGER DEFAULT 1
             )
         """)
         
         # Tabela de logs de validação
         cur.execute("""
             CREATE TABLE IF NOT EXISTS validation_logs (
-                id SERIAL PRIMARY KEY,
-                mac_address VARCHAR(17),
-                license_key VARCHAR(64),
-                ip_address VARCHAR(45),
-                status VARCHAR(20),
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mac_address TEXT,
+                license_key TEXT,
+                ip_address TEXT,
+                status TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -106,19 +106,19 @@ def validate_license():
         if not mac_address or not license_key:
             return jsonify({"error": "Missing mac_address or license_key"}), 400
         
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_FILE)
         cur = conn.cursor()
         
         # Procura máquina
         cur.execute(
-            "SELECT id, active FROM machines WHERE mac_address = %s AND license_key = %s",
+            "SELECT id, active FROM machines WHERE mac_address = ? AND license_key = ?",
             (mac_address, license_key)
         )
         machine = cur.fetchone()
         
         # Log da tentativa
         cur.execute(
-            "INSERT INTO validation_logs (mac_address, license_key, status) VALUES (%s, %s, %s)",
+            "INSERT INTO validation_logs (mac_address, license_key, status) VALUES (?, ?, ?)",
             (mac_address, license_key, "valid" if machine else "invalid")
         )
         
@@ -136,13 +136,13 @@ def validate_license():
             
             # Atualiza last_check
             cur.execute(
-                "UPDATE machines SET last_check = CURRENT_TIMESTAMP WHERE id = %s",
+                "UPDATE machines SET last_check = CURRENT_TIMESTAMP WHERE id = ?",
                 (machine_id,)
             )
             
             # Busca versão mais recente
             cur.execute(
-                "SELECT version_number, download_url, changelog FROM versions WHERE is_active = TRUE ORDER BY released_at DESC LIMIT 1"
+                "SELECT version_number, download_url, changelog FROM versions WHERE is_active = 1 ORDER BY released_at DESC LIMIT 1"
             )
             version = cur.fetchone()
             
@@ -178,11 +178,11 @@ def validate_license():
 def get_latest_version():
     """Retorna versão mais recente disponível"""
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_FILE)
         cur = conn.cursor()
         
         cur.execute(
-            "SELECT version_number, download_url, changelog FROM versions WHERE is_active = TRUE ORDER BY released_at DESC LIMIT 1"
+            "SELECT version_number, download_url, changelog FROM versions WHERE is_active = 1 ORDER BY released_at DESC LIMIT 1"
         )
         version = cur.fetchone()
         
@@ -217,11 +217,11 @@ def generate_license():
         # Gera license_key única
         license_key = hashlib.sha256(f"{mac_address}{uuid.uuid4()}".encode()).hexdigest()[:64]
         
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_FILE)
         cur = conn.cursor()
         
         cur.execute(
-            "INSERT INTO machines (mac_address, license_key, client_name) VALUES (%s, %s, %s)",
+            "INSERT INTO machines (mac_address, license_key, client_name) VALUES (?, ?, ?)",
             (mac_address, license_key, client_name)
         )
         
@@ -253,11 +253,11 @@ def add_version():
         if not version_number or not download_url:
             return jsonify({"error": "Missing version_number or download_url"}), 400
         
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_FILE)
         cur = conn.cursor()
         
         cur.execute(
-            "INSERT INTO versions (version_number, download_url, changelog) VALUES (%s, %s, %s)",
+            "INSERT INTO versions (version_number, download_url, changelog) VALUES (?, ?, ?)",
             (version_number, download_url, changelog)
         )
         
