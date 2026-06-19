@@ -2,12 +2,98 @@
 import uuid
 import hashlib
 import json
+import hmac
+import base64
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-import threading
+import os
 
 # Configuração
 DATABASE_FILE = "parkwash.db"
+ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "change_me_in_production_default_key_123")
+
+# ============================================================================
+# AUTENTICAÇÃO JWT SIMPLES
+# ============================================================================
+
+def generate_admin_token(expires_in=86400):
+    """
+    Gera token JWT para admin (válido por 24h por padrão)
+    Retorna: token string
+    """
+    payload = {
+        "iat": int(time.time()),
+        "exp": int(time.time()) + expires_in,
+        "role": "admin"
+    }
+    
+    # Header
+    header = {"alg": "HS256", "typ": "JWT"}
+    
+    # Encoding
+    def base64_url_encode(data):
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
+    
+    header_encoded = base64_url_encode(header)
+    payload_encoded = base64_url_encode(payload)
+    
+    # Signature
+    message = f"{header_encoded}.{payload_encoded}"
+    signature = hmac.new(
+        ADMIN_SECRET_KEY.encode(),
+        message.encode(),
+        hashlib.sha256
+    ).digest()
+    signature_encoded = base64.urlsafe_b64encode(signature).decode().rstrip('=')
+    
+    token = f"{message}.{signature_encoded}"
+    return token
+
+def verify_admin_token(token):
+    """
+    Verifica se token JWT é válido
+    Retorna: (True, None) se válido, (False, erro_msg) se inválido
+    """
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return False, "Invalid token format"
+        
+        header_encoded, payload_encoded, signature_encoded = parts
+        
+        # Reconstrói a mensagem e verifica assinatura
+        message = f"{header_encoded}.{payload_encoded}"
+        
+        # Padding
+        payload_padded = payload_encoded + '=' * (4 - len(payload_encoded) % 4)
+        
+        # Decodifica payload
+        try:
+            payload_decoded = base64.urlsafe_b64decode(payload_padded).decode()
+            payload = json.loads(payload_decoded)
+        except:
+            return False, "Invalid token payload"
+        
+        # Verifica assinatura
+        expected_signature = hmac.new(
+            ADMIN_SECRET_KEY.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).digest()
+        expected_signature_encoded = base64.urlsafe_b64encode(expected_signature).decode().rstrip('=')
+        
+        if signature_encoded != expected_signature_encoded:
+            return False, "Invalid signature"
+        
+        # Verifica expiração
+        if int(time.time()) > payload.get("exp", 0):
+            return False, "Token expired"
+        
+        return True, payload
+    
+    except Exception as e:
+        return False, f"Token verification failed: {str(e)}"
 
 # ============================================================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -110,13 +196,63 @@ class APIHandler(BaseHTTPRequestHandler):
             self.validate_license(data)
         
         elif path == "/admin/generate-license":
-            self.generate_license(data)
+            self.require_admin_auth(self.generate_license, data)
         
         elif path == "/admin/add-version":
-            self.add_version(data)
+            self.require_admin_auth(self.add_version, data)
+        
+        elif path == "/admin/generate-token":
+            # Endpoint para gerar token admin (use com cuidado!)
+            self.generate_token_endpoint(data)
         
         else:
             self.send_json({"error": "Not found"}, 404)
+    
+    # ========================================================================
+    # AUTENTICAÇÃO
+    # ========================================================================
+    
+    def require_admin_auth(self, callback, data):
+        """
+        Middleware: verifica Authorization header antes de executar callback
+        """
+        auth_header = self.headers.get('Authorization', '')
+        
+        if not auth_header.startswith('Bearer '):
+            self.send_json({"error": "Missing or invalid Authorization header"}, 401)
+            return
+        
+        token = auth_header[7:]  # Remove "Bearer "
+        is_valid, result = verify_admin_token(token)
+        
+        if not is_valid:
+            self.send_json({"error": f"Authentication failed: {result}"}, 401)
+            return
+        
+        # Token válido, executa callback
+        callback(data)
+    
+    def generate_token_endpoint(self, data):
+        """
+        Endpoint especial para gerar token admin
+        Requer: secret_key (senha para gerar token)
+        """
+        secret = data.get("secret_key", "")
+        
+        # Validação simples (em produção, use método mais robusto)
+        if secret != ADMIN_SECRET_KEY:
+            self.send_json({"error": "Invalid secret key"}, 403)
+            return
+        
+        expires_in = data.get("expires_in", 86400)
+        token = generate_admin_token(expires_in)
+        
+        self.send_json({
+            "status": "success",
+            "token": token,
+            "expires_in": expires_in,
+            "message": "Token generated successfully"
+        })
     
     # ========================================================================
     # ENDPOINTS
@@ -323,6 +459,9 @@ class APIHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_database()
+    
+    print(f"🔑 Admin secret key: {ADMIN_SECRET_KEY[:20]}...")
+    print("💡 To generate admin token: POST /admin/generate-token with secret_key")
     
     server = HTTPServer(("0.0.0.0", 8000), APIHandler)
     print("🚀 ParkWash API running on http://0.0.0.0:8000")
