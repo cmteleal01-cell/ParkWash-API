@@ -1,13 +1,13 @@
-﻿import os
-import sqlite3
-from flask import Flask, jsonify, request
+﻿import sqlite3
 import uuid
 import hashlib
+import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import threading
 
 # Configuração
 DATABASE_FILE = "parkwash.db"
-
-app = Flask(__name__)
 
 # ============================================================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -67,217 +67,268 @@ def init_database():
         return False
 
 # ============================================================================
-# ENDPOINTS
+# HANDLER HTTP
 # ============================================================================
 
-@app.route("/", methods=["GET"])
-def read_root():
-    """Health check básico"""
-    return jsonify({"status": "ParkWash API Online", "version": "1.0"})
-
-@app.route("/health", methods=["GET"])
-def health():
-    """Health check detalhado"""
-    return jsonify({"status": "online", "version": "1.0", "database": "connected"})
-
-@app.route("/setup", methods=["POST"])
-def setup_database():
-    """Setup inicial - cria tabelas no banco de dados"""
-    if init_database():
-        return jsonify({
-            "status": "success",
-            "message": "Database initialized successfully",
-            "tables": ["machines", "versions", "validation_logs"]
-        })
-    else:
-        return jsonify({"error": "Failed to initialize database"}), 500
-
-@app.route("/license/validate", methods=["POST"])
-def validate_license():
-    """
-    Valida licença de máquina
-    Retorna: valid (bool), message (str), version e download_url da versão mais recente
-    """
-    try:
-        data = request.get_json()
-        mac_address = data.get("mac_address")
-        license_key = data.get("license_key")
+class APIHandler(BaseHTTPRequestHandler):
+    
+    def do_GET(self):
+        """Handle GET requests"""
+        parsed = urlparse(self.path)
+        path = parsed.path
         
-        if not mac_address or not license_key:
-            return jsonify({"error": "Missing mac_address or license_key"}), 400
+        if path == "/":
+            self.send_json({"status": "ParkWash API Online", "version": "1.0"})
         
-        conn = sqlite3.connect(DATABASE_FILE)
-        cur = conn.cursor()
+        elif path == "/health":
+            self.send_json({"status": "online", "version": "1.0", "database": "connected"})
         
-        # Procura máquina
-        cur.execute(
-            "SELECT id, active FROM machines WHERE mac_address = ? AND license_key = ?",
-            (mac_address, license_key)
-        )
-        machine = cur.fetchone()
+        elif path == "/version/latest":
+            self.get_latest_version()
         
-        # Log da tentativa
-        cur.execute(
-            "INSERT INTO validation_logs (mac_address, license_key, status) VALUES (?, ?, ?)",
-            (mac_address, license_key, "valid" if machine else "invalid")
-        )
+        else:
+            self.send_json({"error": "Not found"}, 404)
+    
+    def do_POST(self):
+        """Handle POST requests"""
+        parsed = urlparse(self.path)
+        path = parsed.path
         
-        if machine:
-            machine_id, is_active = machine
+        # Read body
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length).decode('utf-8')
+        
+        try:
+            data = json.loads(body) if body else {}
+        except:
+            data = {}
+        
+        if path == "/setup":
+            self.setup_database()
+        
+        elif path == "/license/validate":
+            self.validate_license(data)
+        
+        elif path == "/admin/generate-license":
+            self.generate_license(data)
+        
+        elif path == "/admin/add-version":
+            self.add_version(data)
+        
+        else:
+            self.send_json({"error": "Not found"}, 404)
+    
+    # ========================================================================
+    # ENDPOINTS
+    # ========================================================================
+    
+    def setup_database(self):
+        """Setup inicial - cria tabelas"""
+        if init_database():
+            self.send_json({
+                "status": "success",
+                "message": "Database initialized successfully",
+                "tables": ["machines", "versions", "validation_logs"]
+            })
+        else:
+            self.send_json({"error": "Failed to initialize database"}, 500)
+    
+    def validate_license(self, data):
+        """Valida licença de máquina"""
+        try:
+            mac_address = data.get("mac_address")
+            license_key = data.get("license_key")
             
-            if not is_active:
+            if not mac_address or not license_key:
+                self.send_json({"error": "Missing mac_address or license_key"}, 400)
+                return
+            
+            conn = sqlite3.connect(DATABASE_FILE)
+            cur = conn.cursor()
+            
+            # Procura máquina
+            cur.execute(
+                "SELECT id, active FROM machines WHERE mac_address = ? AND license_key = ?",
+                (mac_address, license_key)
+            )
+            machine = cur.fetchone()
+            
+            # Log da tentativa
+            cur.execute(
+                "INSERT INTO validation_logs (mac_address, license_key, status) VALUES (?, ?, ?)",
+                (mac_address, license_key, "valid" if machine else "invalid")
+            )
+            
+            if machine:
+                machine_id, is_active = machine
+                
+                if not is_active:
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    self.send_json({"valid": False, "message": "License is inactive"})
+                    return
+                
+                # Atualiza last_check
+                cur.execute(
+                    "UPDATE machines SET last_check = CURRENT_TIMESTAMP WHERE id = ?",
+                    (machine_id,)
+                )
+                
+                # Busca versão mais recente
+                cur.execute(
+                    "SELECT version_number, download_url, changelog FROM versions WHERE is_active = 1 ORDER BY released_at DESC LIMIT 1"
+                )
+                version = cur.fetchone()
+                
                 conn.commit()
                 cur.close()
                 conn.close()
-                return jsonify({
+                
+                if version:
+                    self.send_json({
+                        "valid": True,
+                        "message": "License is valid",
+                        "version": version[0],
+                        "download_url": version[1]
+                    })
+                else:
+                    self.send_json({
+                        "valid": True,
+                        "message": "License is valid (no new version)"
+                    })
+            else:
+                conn.commit()
+                cur.close()
+                conn.close()
+                self.send_json({
                     "valid": False,
-                    "message": "License is inactive"
+                    "message": "Invalid MAC address or license key"
                 })
+        
+        except Exception as e:
+            self.send_json({"error": f"Validation error: {str(e)}"}, 500)
+    
+    def get_latest_version(self):
+        """Retorna versão mais recente disponível"""
+        try:
+            conn = sqlite3.connect(DATABASE_FILE)
+            cur = conn.cursor()
             
-            # Atualiza last_check
-            cur.execute(
-                "UPDATE machines SET last_check = CURRENT_TIMESTAMP WHERE id = ?",
-                (machine_id,)
-            )
-            
-            # Busca versão mais recente
             cur.execute(
                 "SELECT version_number, download_url, changelog FROM versions WHERE is_active = 1 ORDER BY released_at DESC LIMIT 1"
             )
             version = cur.fetchone()
             
-            conn.commit()
             cur.close()
             conn.close()
             
             if version:
-                return jsonify({
-                    "valid": True,
-                    "message": "License is valid",
-                    "version": version[0],
-                    "download_url": version[1]
+                self.send_json({
+                    "version_number": version[0],
+                    "download_url": version[1],
+                    "changelog": version[2] or ""
                 })
             else:
-                return jsonify({
-                    "valid": True,
-                    "message": "License is valid (no new version)"
-                })
-        else:
+                self.send_json({"error": "No version found"}, 404)
+        
+        except Exception as e:
+            self.send_json({"error": f"Error: {str(e)}"}, 500)
+    
+    def generate_license(self, data):
+        """ADMIN ONLY: Gera nova licença para máquina"""
+        try:
+            mac_address = data.get("mac_address")
+            client_name = data.get("client_name", "")
+            
+            if not mac_address:
+                self.send_json({"error": "Missing mac_address"}, 400)
+                return
+            
+            # Gera license_key única
+            license_key = hashlib.sha256(f"{mac_address}{uuid.uuid4()}".encode()).hexdigest()[:64]
+            
+            conn = sqlite3.connect(DATABASE_FILE)
+            cur = conn.cursor()
+            
+            cur.execute(
+                "INSERT INTO machines (mac_address, license_key, client_name) VALUES (?, ?, ?)",
+                (mac_address, license_key, client_name)
+            )
+            
             conn.commit()
             cur.close()
             conn.close()
-            return jsonify({
-                "valid": False,
-                "message": "Invalid MAC address or license key"
+            
+            self.send_json({
+                "status": "success",
+                "mac_address": mac_address,
+                "license_key": license_key,
+                "message": "License generated successfully"
             })
+        
+        except Exception as e:
+            self.send_json({"error": f"Error: {str(e)}"}, 500)
     
-    except Exception as e:
-        return jsonify({"error": f"Validation error: {str(e)}"}), 500
-
-@app.route("/version/latest", methods=["GET"])
-def get_latest_version():
-    """Retorna versão mais recente disponível"""
-    try:
-        conn = sqlite3.connect(DATABASE_FILE)
-        cur = conn.cursor()
-        
-        cur.execute(
-            "SELECT version_number, download_url, changelog FROM versions WHERE is_active = 1 ORDER BY released_at DESC LIMIT 1"
-        )
-        version = cur.fetchone()
-        
-        cur.close()
-        conn.close()
-        
-        if version:
-            return jsonify({
-                "version_number": version[0],
-                "download_url": version[1],
-                "changelog": version[2] or ""
+    def add_version(self, data):
+        """ADMIN ONLY: Adiciona nova versão"""
+        try:
+            version_number = data.get("version_number")
+            download_url = data.get("download_url")
+            changelog = data.get("changelog", "")
+            
+            if not version_number or not download_url:
+                self.send_json({"error": "Missing version_number or download_url"}, 400)
+                return
+            
+            conn = sqlite3.connect(DATABASE_FILE)
+            cur = conn.cursor()
+            
+            cur.execute(
+                "INSERT INTO versions (version_number, download_url, changelog) VALUES (?, ?, ?)",
+                (version_number, download_url, changelog)
+            )
+            
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            self.send_json({
+                "status": "success",
+                "version": version_number,
+                "message": "Version added successfully"
             })
-        else:
-            return jsonify({"error": "No version found"}), 404
+        
+        except Exception as e:
+            self.send_json({"error": f"Error: {str(e)}"}, 500)
     
-    except Exception as e:
-        return jsonify({"error": f"Error: {str(e)}"}), 500
-
-@app.route("/admin/generate-license", methods=["POST"])
-def generate_license():
-    """
-    ADMIN ONLY: Gera nova licença para máquina
-    """
-    try:
-        data = request.get_json()
-        mac_address = data.get("mac_address")
-        client_name = data.get("client_name", "")
-        
-        if not mac_address:
-            return jsonify({"error": "Missing mac_address"}), 400
-        
-        # Gera license_key única
-        license_key = hashlib.sha256(f"{mac_address}{uuid.uuid4()}".encode()).hexdigest()[:64]
-        
-        conn = sqlite3.connect(DATABASE_FILE)
-        cur = conn.cursor()
-        
-        cur.execute(
-            "INSERT INTO machines (mac_address, license_key, client_name) VALUES (?, ?, ?)",
-            (mac_address, license_key, client_name)
-        )
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            "status": "success",
-            "mac_address": mac_address,
-            "license_key": license_key,
-            "message": "License generated successfully"
-        })
+    # ========================================================================
+    # UTILITIES
+    # ========================================================================
     
-    except Exception as e:
-        return jsonify({"error": f"Error: {str(e)}"}), 500
-
-@app.route("/admin/add-version", methods=["POST"])
-def add_version():
-    """
-    ADMIN ONLY: Adiciona nova versão
-    """
-    try:
-        data = request.get_json()
-        version_number = data.get("version_number")
-        download_url = data.get("download_url")
-        changelog = data.get("changelog", "")
-        
-        if not version_number or not download_url:
-            return jsonify({"error": "Missing version_number or download_url"}), 400
-        
-        conn = sqlite3.connect(DATABASE_FILE)
-        cur = conn.cursor()
-        
-        cur.execute(
-            "INSERT INTO versions (version_number, download_url, changelog) VALUES (?, ?, ?)",
-            (version_number, download_url, changelog)
-        )
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            "status": "success",
-            "version": version_number,
-            "message": "Version added successfully"
-        })
+    def send_json(self, data, status_code=200):
+        """Send JSON response"""
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode('utf-8'))
     
-    except Exception as e:
-        return jsonify({"error": f"Error: {str(e)}"}), 500
+    def log_message(self, format, *args):
+        """Suppress default logging"""
+        pass
 
 # ============================================================================
-# INICIALIZAÇÃO
+# MAIN
 # ============================================================================
 
 if __name__ == "__main__":
     init_database()
-    app.run(host="0.0.0.0", port=8000, debug=False)
+    
+    server = HTTPServer(("0.0.0.0", 8000), APIHandler)
+    print("🚀 ParkWash API running on http://0.0.0.0:8000")
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n✅ Server stopped")
+        server.server_close()
