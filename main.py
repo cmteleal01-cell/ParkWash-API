@@ -1,12 +1,9 @@
-﻿@"
-import os
+﻿import os
 import psycopg2
-from psycopg2 import sql
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uuid
-from datetime import datetime
 import hashlib
+import json
 
 # Configuração
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://parkwash_user:xZkA1SWUYuwYUOZZMhfkGVVRdGYGI9JF@dpg-d8qj6rkvikkc73b18e6g-a/parkwash")
@@ -70,28 +67,6 @@ def init_database():
         print(f"❌ Database initialization error: {e}")
         return False
 
-# Inicializa banco na primeira requisição
-db_initialized = False
-
-# ============================================================================
-# MODELOS PYDANTIC
-# ============================================================================
-
-class LicenseValidationRequest(BaseModel):
-    mac_address: str
-    license_key: str
-
-class LicenseValidationResponse(BaseModel):
-    valid: bool
-    message: str
-    version: str = None
-    download_url: str = None
-
-class VersionResponse(BaseModel):
-    version_number: str
-    download_url: str
-    changelog: str = None
-
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
@@ -109,10 +84,7 @@ def health():
 @app.post("/setup")
 def setup_database():
     """Setup inicial - cria tabelas no banco de dados"""
-    global db_initialized
-    
     if init_database():
-        db_initialized = True
         return {
             "status": "success",
             "message": "Database initialized successfully",
@@ -121,8 +93,8 @@ def setup_database():
     else:
         raise HTTPException(status_code=500, detail="Failed to initialize database")
 
-@app.post("/license/validate", response_model=LicenseValidationResponse)
-def validate_license(request: LicenseValidationRequest):
+@app.post("/license/validate")
+def validate_license(mac_address: str, license_key: str):
     """
     Valida licença de máquina
     Retorna: valid (bool), message (str), version e download_url da versão mais recente
@@ -134,14 +106,14 @@ def validate_license(request: LicenseValidationRequest):
         # Procura máquina
         cur.execute(
             "SELECT id, active FROM machines WHERE mac_address = %s AND license_key = %s",
-            (request.mac_address, request.license_key)
+            (mac_address, license_key)
         )
         machine = cur.fetchone()
         
         # Log da tentativa
         cur.execute(
             "INSERT INTO validation_logs (mac_address, license_key, status) VALUES (%s, %s, %s)",
-            (request.mac_address, request.license_key, "valid" if machine else "invalid")
+            (mac_address, license_key, "valid" if machine else "invalid")
         )
         
         if machine:
@@ -151,10 +123,10 @@ def validate_license(request: LicenseValidationRequest):
                 conn.commit()
                 cur.close()
                 conn.close()
-                return LicenseValidationResponse(
-                    valid=False,
-                    message="License is inactive"
-                )
+                return {
+                    "valid": False,
+                    "message": "License is inactive"
+                }
             
             # Atualiza last_check
             cur.execute(
@@ -173,30 +145,30 @@ def validate_license(request: LicenseValidationRequest):
             conn.close()
             
             if version:
-                return LicenseValidationResponse(
-                    valid=True,
-                    message="License is valid",
-                    version=version[0],
-                    download_url=version[1]
-                )
+                return {
+                    "valid": True,
+                    "message": "License is valid",
+                    "version": version[0],
+                    "download_url": version[1]
+                }
             else:
-                return LicenseValidationResponse(
-                    valid=True,
-                    message="License is valid (no new version)"
-                )
+                return {
+                    "valid": True,
+                    "message": "License is valid (no new version)"
+                }
         else:
             conn.commit()
             cur.close()
             conn.close()
-            return LicenseValidationResponse(
-                valid=False,
-                message="Invalid MAC address or license key"
-            )
+            return {
+                "valid": False,
+                "message": "Invalid MAC address or license key"
+            }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
 
-@app.get("/version/latest", response_model=VersionResponse)
+@app.get("/version/latest")
 def get_latest_version():
     """Retorna versão mais recente disponível"""
     try:
@@ -212,11 +184,11 @@ def get_latest_version():
         conn.close()
         
         if version:
-            return VersionResponse(
-                version_number=version[0],
-                download_url=version[1],
-                changelog=version[2] or ""
-            )
+            return {
+                "version_number": version[0],
+                "download_url": version[1],
+                "changelog": version[2] or ""
+            }
         else:
             raise HTTPException(status_code=404, detail="No version found")
     
@@ -288,11 +260,8 @@ def add_version(version_number: str, download_url: str, changelog: str = ""):
 @app.on_event("startup")
 async def startup_event():
     """Executa ao iniciar a aplicação"""
-    global db_initialized
     init_database()
-    db_initialized = True
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-"@ | Out-File -Encoding UTF8 main.py
