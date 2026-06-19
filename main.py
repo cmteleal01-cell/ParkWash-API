@@ -1,14 +1,13 @@
 ﻿import os
 import psycopg2
-from fastapi import FastAPI, HTTPException
+from flask import Flask, jsonify, request
 import uuid
 import hashlib
-import json
 
 # Configuração
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://parkwash_user:xZkA1SWUYuwYUOZZMhfkGVVRdGYGI9JF@dpg-d8qj6rkvikkc73b18e6g-a/parkwash")
 
-app = FastAPI()
+app = Flask(__name__)
 
 # ============================================================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -71,35 +70,42 @@ def init_database():
 # ENDPOINTS
 # ============================================================================
 
-@app.get("/")
+@app.route("/", methods=["GET"])
 def read_root():
     """Health check básico"""
-    return {"status": "ParkWash API Online", "version": "1.0"}
+    return jsonify({"status": "ParkWash API Online", "version": "1.0"})
 
-@app.get("/health")
+@app.route("/health", methods=["GET"])
 def health():
     """Health check detalhado"""
-    return {"status": "online", "version": "1.0", "database": "connected"}
+    return jsonify({"status": "online", "version": "1.0", "database": "connected"})
 
-@app.post("/setup")
+@app.route("/setup", methods=["POST"])
 def setup_database():
     """Setup inicial - cria tabelas no banco de dados"""
     if init_database():
-        return {
+        return jsonify({
             "status": "success",
             "message": "Database initialized successfully",
             "tables": ["machines", "versions", "validation_logs"]
-        }
+        })
     else:
-        raise HTTPException(status_code=500, detail="Failed to initialize database")
+        return jsonify({"error": "Failed to initialize database"}), 500
 
-@app.post("/license/validate")
-def validate_license(mac_address: str, license_key: str):
+@app.route("/license/validate", methods=["POST"])
+def validate_license():
     """
     Valida licença de máquina
     Retorna: valid (bool), message (str), version e download_url da versão mais recente
     """
     try:
+        data = request.get_json()
+        mac_address = data.get("mac_address")
+        license_key = data.get("license_key")
+        
+        if not mac_address or not license_key:
+            return jsonify({"error": "Missing mac_address or license_key"}), 400
+        
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
@@ -123,10 +129,10 @@ def validate_license(mac_address: str, license_key: str):
                 conn.commit()
                 cur.close()
                 conn.close()
-                return {
+                return jsonify({
                     "valid": False,
                     "message": "License is inactive"
-                }
+                })
             
             # Atualiza last_check
             cur.execute(
@@ -145,30 +151,30 @@ def validate_license(mac_address: str, license_key: str):
             conn.close()
             
             if version:
-                return {
+                return jsonify({
                     "valid": True,
                     "message": "License is valid",
                     "version": version[0],
                     "download_url": version[1]
-                }
+                })
             else:
-                return {
+                return jsonify({
                     "valid": True,
                     "message": "License is valid (no new version)"
-                }
+                })
         else:
             conn.commit()
             cur.close()
             conn.close()
-            return {
+            return jsonify({
                 "valid": False,
                 "message": "Invalid MAC address or license key"
-            }
+            })
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
+        return jsonify({"error": f"Validation error: {str(e)}"}), 500
 
-@app.get("/version/latest")
+@app.route("/version/latest", methods=["GET"])
 def get_latest_version():
     """Retorna versão mais recente disponível"""
     try:
@@ -184,23 +190,30 @@ def get_latest_version():
         conn.close()
         
         if version:
-            return {
+            return jsonify({
                 "version_number": version[0],
                 "download_url": version[1],
                 "changelog": version[2] or ""
-            }
+            })
         else:
-            raise HTTPException(status_code=404, detail="No version found")
+            return jsonify({"error": "No version found"}), 404
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        return jsonify({"error": f"Error: {str(e)}"}), 500
 
-@app.post("/admin/generate-license")
-def generate_license(mac_address: str, client_name: str = ""):
+@app.route("/admin/generate-license", methods=["POST"])
+def generate_license():
     """
     ADMIN ONLY: Gera nova licença para máquina
     """
     try:
+        data = request.get_json()
+        mac_address = data.get("mac_address")
+        client_name = data.get("client_name", "")
+        
+        if not mac_address:
+            return jsonify({"error": "Missing mac_address"}), 400
+        
         # Gera license_key única
         license_key = hashlib.sha256(f"{mac_address}{uuid.uuid4()}".encode()).hexdigest()[:64]
         
@@ -216,22 +229,30 @@ def generate_license(mac_address: str, client_name: str = ""):
         cur.close()
         conn.close()
         
-        return {
+        return jsonify({
             "status": "success",
             "mac_address": mac_address,
             "license_key": license_key,
             "message": "License generated successfully"
-        }
+        })
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        return jsonify({"error": f"Error: {str(e)}"}), 500
 
-@app.post("/admin/add-version")
-def add_version(version_number: str, download_url: str, changelog: str = ""):
+@app.route("/admin/add-version", methods=["POST"])
+def add_version():
     """
     ADMIN ONLY: Adiciona nova versão
     """
     try:
+        data = request.get_json()
+        version_number = data.get("version_number")
+        download_url = data.get("download_url")
+        changelog = data.get("changelog", "")
+        
+        if not version_number or not download_url:
+            return jsonify({"error": "Missing version_number or download_url"}), 400
+        
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
@@ -244,24 +265,19 @@ def add_version(version_number: str, download_url: str, changelog: str = ""):
         cur.close()
         conn.close()
         
-        return {
+        return jsonify({
             "status": "success",
             "version": version_number,
             "message": "Version added successfully"
-        }
+        })
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        return jsonify({"error": f"Error: {str(e)}"}), 500
 
 # ============================================================================
 # INICIALIZAÇÃO
 # ============================================================================
 
-@app.on_event("startup")
-async def startup_event():
-    """Executa ao iniciar a aplicação"""
-    init_database()
-
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    init_database()
+    app.run(host="0.0.0.0", port=8000, debug=False)
