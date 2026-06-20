@@ -300,6 +300,7 @@ class APIHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
+        print(f"[POST] {self.path}")
 
         content_length = int(self.headers.get('Content-Length', 0))
         body_raw = self.rfile.read(content_length).decode('utf-8')
@@ -574,6 +575,8 @@ class APIHandler(BaseHTTPRequestHandler):
            gera licença sem dono + manda e-mail automático pro comprador.
         4. Sempre responde 200 rápido (MP reenvia se não receber 200).
         """
+        print(f"[WEBHOOK] Recebido. path={self.path} body={data}")
+
         from urllib.parse import urlparse, parse_qs
         partes_url = urlparse(self.path)
         query = parse_qs(partes_url.query)
@@ -584,13 +587,15 @@ class APIHandler(BaseHTTPRequestHandler):
 
         x_signature = self.headers.get("x-signature")
         x_request_id = self.headers.get("x-request-id")
+        print(f"[WEBHOOK] data_id={data_id} x_signature={x_signature} x_request_id={x_request_id}")
 
         if not verificar_assinatura_mp(x_signature, x_request_id, data_id):
-            # Não veio do Mercado Pago de fato — ignora sem processar nada.
+            print("[WEBHOOK] Assinatura INVÁLIDA — descartando.")
             self.send_json({"received": True, "processado": False, "motivo": "assinatura_invalida"}, 200)
             return
 
         if not data_id:
+            print("[WEBHOOK] Sem data_id — descartando.")
             self.send_json({"received": True, "processado": False, "motivo": "sem_payment_id"}, 200)
             return
 
@@ -599,18 +604,21 @@ class APIHandler(BaseHTTPRequestHandler):
             "GET", "pagamentos_processados",
             params={"payment_id_mp": f"eq.{data_id}", "select": "id"}
         )
+        print(f"[WEBHOOK] Checagem idempotência: status={status_check} ja_processados={ja_processados}")
         if status_check == 200 and ja_processados:
             self.send_json({"received": True, "processado": False, "motivo": "ja_processado_antes"}, 200)
             return
 
         # Busca o registro REAL do pagamento — fonte da verdade.
         status_pag, pagamento = buscar_pagamento_mp(data_id)
+        print(f"[WEBHOOK] Pagamento real consultado: status_pag={status_pag} pagamento={pagamento}")
 
         if status_pag != 200 or not pagamento:
             self.send_json({"received": True, "processado": False, "motivo": "pagamento_nao_encontrado"}, 200)
             return
 
         if pagamento.get("status") != "approved":
+            print(f"[WEBHOOK] Status não é approved: {pagamento.get('status')}")
             self.send_json({"received": True, "processado": False,
                              "motivo": f"status_{pagamento.get('status')}"}, 200)
             return
@@ -622,11 +630,12 @@ class APIHandler(BaseHTTPRequestHandler):
 
         # Gera a licença — sem mac_address, trava no primeiro uso real.
         license_key = hashlib.sha256(f"{email_comprador}{uuid.uuid4()}".encode()).hexdigest()[:64]
-        supabase_request(
+        status_lic, resultado_lic = supabase_request(
             "POST", "machines",
             body={"license_key": license_key, "client_name": nome_comprador or email_comprador},
             extra_headers={"Prefer": "return=representation"}
         )
+        print(f"[WEBHOOK] Licença criada: status={status_lic} resultado={resultado_lic}")
 
         # Registra que esse pagamento já foi processado (evita duplicar se o
         # Mercado Pago reenviar a mesma notificação).
@@ -643,6 +652,7 @@ class APIHandler(BaseHTTPRequestHandler):
         email_enviado, detalhe_email = (False, "email_nao_configurado")
         if email_pronto and email_comprador:
             email_enviado, detalhe_email = enviar_email_licenca(email_comprador, nome_comprador, license_key)
+        print(f"[WEBHOOK] E-mail: enviado={email_enviado} detalhe={detalhe_email}")
 
         self.send_json({
             "received": True,
