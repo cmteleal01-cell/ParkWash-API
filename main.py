@@ -330,10 +330,6 @@ class APIHandler(BaseHTTPRequestHandler):
         
         # --- Assinatura Recorrente ---
         elif path == "/pagamento/assinatura":
-            if method != "POST":
-                self.send_json({"erro": "Method not allowed"}, 405)
-                return
-            
             try:
                 body = json.loads(body_str) if body_str else {}
                 email = body.get("email", "cliente@example.com")
