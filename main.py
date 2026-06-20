@@ -327,6 +327,151 @@ class APIHandler(BaseHTTPRequestHandler):
             self.require_admin_auth(self.criar_link_pagamento_endpoint, data)
         elif path == "/webhook/mercadopago":
             self.webhook_mercadopago(data)
+        
+        # --- Assinatura Recorrente ---
+        elif path == "/pagamento/assinatura":
+            if method != "POST":
+                self.send_json({"erro": "Method not allowed"}, 405)
+                return
+            
+            try:
+                body = json.loads(body_str) if body_str else {}
+                email = body.get("email", "cliente@example.com")
+                resultado = criar_preferencia_recorrente(email)
+                self.send_json(resultado, 200)
+            except Exception as e:
+                self.send_json({"erro": str(e)}, 400)
+        
+        # --- Painel Admin Dashboard ---
+        elif path.startswith("/admin/dashboard"):
+            token = None
+            if "?" in path:
+                query_string = path.split("?")[1]
+                params = {}
+                for param in query_string.split("&"):
+                    if "=" in param:
+                        key, val = param.split("=", 1)
+                        params[key] = urllib.parse.unquote(val)
+                token = params.get("token")
+            
+            if token != ADMIN_SECRET_KEY:
+                self.send_response(401)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"<h1>401 - Nao autorizado</h1>")
+                return
+            
+            # Busca todas as licencas
+            status_code, licencas = supabase_request("GET", "licencas", {"select": "*"})
+            
+            if status_code != 200 or not licencas:
+                licencas = []
+            
+            hoje = datetime.now()
+            
+            # Categoriza
+            ativas = []
+            vencendo = []
+            atraso = []
+            bloqueadas = []
+            
+            for lic in licencas:
+                if not lic:
+                    continue
+                try:
+                    venc = datetime.fromisoformat(lic.get("data_expiracao", ""))
+                    dias = (venc - hoje).days
+                    
+                    status = lic.get("status", "desconhecido")
+                    if status == "bloqueada":
+                        bloqueadas.append(lic)
+                    elif status == "atraso":
+                        atraso.append(lic)
+                    elif 0 < dias <= 3:
+                        vencendo.append(lic)
+                    elif dias > 0:
+                        ativas.append(lic)
+                    else:
+                        bloqueadas.append(lic)
+                except:
+                    continue
+            
+            # Monta HTML
+            html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - Park & Wash</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', sans-serif; background: #f5f5f5; }}
+        .header {{ background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; padding: 20px; text-align: center; }}
+        .container {{ max-width: 1200px; margin: 20px auto; padding: 0 20px; }}
+        .stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }}
+        .stat-card {{ background: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        .stat-card h3 {{ font-size: 32px; font-weight: 700; color: #2563eb; }}
+        .stat-card p {{ color: #666; margin-top: 5px; }}
+        .table-section {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+        th {{ background: #f3f4f6; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }}
+        td {{ padding: 12px; border-bottom: 1px solid #e5e7eb; }}
+        .empty {{ text-align: center; color: #999; padding: 20px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ Painel Admin - Park & Wash</h1>
+        <p>Última atualização: {hoje.strftime('%d/%m/%Y %H:%M:%S')}</p>
+    </div>
+    
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <h3>{len(ativas)}</h3>
+                <p>Ativas</p>
+            </div>
+            <div class="stat-card">
+                <h3>{len(vencendo)}</h3>
+                <p>Vencendo em 3 dias</p>
+            </div>
+            <div class="stat-card">
+                <h3>{len(atraso)}</h3>
+                <p>Em Atraso</p>
+            </div>
+            <div class="stat-card">
+                <h3>{len(bloqueadas)}</h3>
+                <p>Bloqueadas</p>
+            </div>
+        </div>
+        
+        <div class="table-section">
+            <h3>✅ Licenças Ativas ({len(ativas)})</h3>
+            {gerar_tabela_admin_html(ativas) if ativas else '<p class="empty">Nenhuma licença ativa</p>'}
+        </div>
+        
+        <div class="table-section">
+            <h3>⏰ Vencendo em 3 dias ({len(vencendo)})</h3>
+            {gerar_tabela_admin_html(vencendo) if vencendo else '<p class="empty">Nenhuma</p>'}
+        </div>
+        
+        <div class="table-section">
+            <h3>⚠️ Em Atraso ({len(atraso)})</h3>
+            {gerar_tabela_admin_html(atraso) if atraso else '<p class="empty">Nenhuma</p>'}
+        </div>
+        
+        <div class="table-section">
+            <h3>🚫 Bloqueadas ({len(bloqueadas)})</h3>
+            {gerar_tabela_admin_html(bloqueadas) if bloqueadas else '<p class="empty">Nenhuma</p>'}
+        </div>
+    </div>
+</body>
+</html>"""
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode('utf-8'))
+        
         else:
             self.send_json({"error": "Not found"}, 404)
 
