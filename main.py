@@ -319,6 +319,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
+        print(f"[DO_POST_CALLED] path={self.path}")
         from urllib.parse import urlparse
         path = urlparse(self.path).path
         print(f"[POST] {self.path}")
