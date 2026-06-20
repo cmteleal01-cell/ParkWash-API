@@ -696,3 +696,365 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n✅ Server stopped")
         server.server_close()
+# ============================================================================
+# ASSINATURA RECORRENTE (R$ 119,90/mês) — ADICIONE ISTO AO SEU main.py
+# ============================================================================
+
+def criar_preferencia_recorrente(email_cliente: str):
+    """
+    Cria preferência de assinatura automática no Mercado Pago
+    Valor: R$ 119,90/mês
+    Tolerância: 2 dias após vencimento
+    """
+    if not MERCADOPAGO_ACCESS_TOKEN:
+        return {"erro": "Mercado Pago não configurado"}
+    
+    payload = {
+        "payer": {"email": email_cliente},
+        "auto_recurring": {
+            "frequency": 1,
+            "frequency_type": "months",
+            "transaction_amount": 119.90,
+            "repetitions": 0  # 0 = infinito
+        },
+        "back_urls": {
+            "success": "https://parkwash-api.onrender.com/pagamento/sucesso",
+            "failure": "https://parkwash-api.onrender.com/pagamento/erro",
+            "pending": "https://parkwash-api.onrender.com/pagamento/pendente"
+        },
+        "notification_url": "https://parkwash-api.onrender.com/webhook/pagamentos",
+        "external_reference": f"parkwash_recorrente_{datetime.now().timestamp()}",
+        "description": "Park & Wash - Gestão de Estacionamentos e Lava-Rápidos"
+    }
+    
+    import json
+    body_json = json.dumps(payload).encode('utf-8')
+    
+    url = "https://api.mercadopago.com/checkout/preferences"
+    req = urllib.request.Request(
+        url,
+        data=body_json,
+        method='POST',
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {MERCADOPAGO_ACCESS_TOKEN}'
+        }
+    )
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            dados = json.loads(response.read().decode('utf-8'))
+            return {
+                "preference_id": dados.get("id"),
+                "init_point": dados.get("init_point"),
+                "sandbox_init_point": dados.get("sandbox_init_point")
+            }
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+# ============================================================================
+# ROTAS PARA ASSINATURA
+# ============================================================================
+
+def handle_assinatura(path, method, body_str):
+    """POST /pagamento/assinatura — Cria link de assinatura recorrente"""
+    if method != "POST":
+        return 405, {"erro": "Method not allowed"}
+    
+    try:
+        body = json.loads(body_str) if body_str else {}
+        email = body.get("email", "cliente@example.com")
+        resultado = criar_preferencia_recorrente(email)
+        return 200, resultado
+    except Exception as e:
+        return 400, {"erro": str(e)}
+
+
+# ============================================================================
+# PAINEL ADMIN — DASHBOARD
+# ============================================================================
+
+def gerar_dashboard_admin(token_admin: str):
+    """
+    Gera HTML do painel admin
+    Mostra licenças ativas, vencimentos, atrasos, bloqueadas
+    """
+    
+    if token_admin != ADMIN_SECRET_KEY:
+        return 401, "Não autorizado"
+    
+    # Busca todas as licenças
+    status_code, licencas = supabase_request("GET", "licencas", {"select": "*"})
+    
+    if status_code != 200 or not licencas:
+        licencas = []
+    
+    hoje = datetime.now()
+    
+    # Categoriza
+    ativas = []
+    vencendo = []
+    atraso = []
+    bloqueadas = []
+    
+    for lic in licencas:
+        if not lic:
+            continue
+        try:
+            venc = datetime.fromisoformat(lic.get("data_expiracao", ""))
+            dias = (venc - hoje).days
+            
+            status = lic.get("status", "desconhecido")
+            if status == "bloqueada":
+                bloqueadas.append(lic)
+            elif status == "atraso":
+                atraso.append(lic)
+            elif 0 < dias <= 3:
+                vencendo.append(lic)
+            elif dias > 0:
+                ativas.append(lic)
+            else:
+                bloqueadas.append(lic)
+        except:
+            continue
+    
+    # Monta HTML
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Admin - Park & Wash</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ font-family: 'Segoe UI', sans-serif; background: #f5f5f5; }}
+            .header {{ background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; padding: 20px; text-align: center; }}
+            .container {{ max-width: 1200px; margin: 20px auto; padding: 0 20px; }}
+            .stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }}
+            .stat-card {{ background: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+            .stat-card h3 {{ font-size: 32px; font-weight: 700; color: #2563eb; }}
+            .stat-card p {{ color: #666; margin-top: 5px; }}
+            .table-section {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            th {{ background: #f3f4f6; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }}
+            td {{ padding: 12px; border-bottom: 1px solid #e5e7eb; }}
+            .status-ativo {{ color: #10b981; font-weight: 600; }}
+            .status-vencendo {{ color: #f59e0b; font-weight: 600; }}
+            .status-atraso {{ color: #ef4444; font-weight: 600; }}
+            .status-bloqueada {{ color: #6b7280; font-weight: 600; }}
+            .empty {{ text-align: center; color: #999; padding: 20px; }}
+            @media (max-width: 768px) {{ .stats {{ grid-template-columns: repeat(2, 1fr); }} }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🛡️ Painel Admin - Park & Wash</h1>
+            <p>Última atualização: {hoje.strftime('%d/%m/%Y %H:%M:%S')}</p>
+        </div>
+        
+        <div class="container">
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>{len(ativas)}</h3>
+                    <p>Ativas</p>
+                </div>
+                <div class="stat-card">
+                    <h3>{len(vencendo)}</h3>
+                    <p>Vencendo em 3 dias</p>
+                </div>
+                <div class="stat-card">
+                    <h3>{len(atraso)}</h3>
+                    <p>Em Atraso</p>
+                </div>
+                <div class="stat-card">
+                    <h3>{len(bloqueadas)}</h3>
+                    <p>Bloqueadas</p>
+                </div>
+            </div>
+            
+            <div class="table-section">
+                <h3>✅ Licenças Ativas ({len(ativas)})</h3>
+                {gerar_tabela_html(ativas) if ativas else '<p class="empty">Nenhuma licença ativa</p>'}
+            </div>
+            
+            <div class="table-section">
+                <h3>⏰ Vencendo em 3 dias ({len(vencendo)})</h3>
+                {gerar_tabela_html(vencendo) if vencendo else '<p class="empty">Nenhuma</p>'}
+            </div>
+            
+            <div class="table-section">
+                <h3>⚠️ Em Atraso ({len(atraso)})</h3>
+                {gerar_tabela_html(atraso) if atraso else '<p class="empty">Nenhuma</p>'}
+            </div>
+            
+            <div class="table-section">
+                <h3>🚫 Bloqueadas ({len(bloqueadas)})</h3>
+                {gerar_tabela_html(bloqueadas) if bloqueadas else '<p class="empty">Nenhuma</p>'}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return 200, html
+
+
+def gerar_tabela_html(licencas):
+    """Gera HTML da tabela de licenças"""
+    if not licencas:
+        return ""
+    
+    linhas = ""
+    for lic in licencas:
+        email = lic.get("email", "N/A")
+        venc = lic.get("data_expiracao", "N/A")
+        status = lic.get("status", "N/A")
+        
+        linhas += f"""
+        <tr>
+            <td>{email}</td>
+            <td>{venc}</td>
+            <td><span class="status-{status}">{status}</span></td>
+        </tr>
+        """
+    
+    return f"""
+    <table>
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Data de Vencimento</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>{linhas}</tbody>
+    </table>
+    """
+
+
+def handle_admin_dashboard(path, method, body_str, query_params):
+    """GET /admin/dashboard?token=ADMIN_SECRET — Dashboard"""
+    if method != "GET":
+        return 405, {"erro": "Method not allowed"}
+    
+    token = query_params.get("token", [""])[0]
+    status, html = gerar_dashboard_admin(token)
+    
+    if status == 401:
+        return 401, "<h1>❌ Não autorizado</h1>"
+    
+    return 200, html
+
+
+# ============================================================================
+# EMAILS AUTOMÁTICOS
+# ============================================================================
+
+def enviar_email_aviso_vencimento(email_cliente: str, dias: int, vencimento: str):
+    """Envia email avisando que licença vence em X dias"""
+    if not RESEND_API_KEY:
+        return False
+    
+    html = f"""
+    <html>
+    <head><meta charset="UTF-8"></head>
+    <body style="font-family: Arial; max-width: 600px; margin: 0 auto;">
+        <div style="background: #1e3a8a; color: white; padding: 20px; text-align: center;">
+            <h1>⏰ Aviso Importante</h1>
+        </div>
+        <div style="background: #f9fafb; padding: 30px;">
+            <p>Olá,</p>
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                <strong>Sua licença Park & Wash vencerá em {dias} dia(s)!</strong><br>
+                Data de vencimento: <strong>{vencimento}</strong>
+            </div>
+            <p>Para continuar usando sem interrupções, renove agora:</p>
+            <p><a href="https://parkwash-landing.github.io" style="display: inline-block; background: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600;">Renovar Licença</a></p>
+            <p>Dúvidas? Entre em contato: cmte_leal@yahoo.com.br ou (11) 99999-7925</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    payload = {
+        "from": "Park & Wash <onboarding@resend.dev>",
+        "to": email_cliente,
+        "subject": f"⏰ Sua licença vencerá em {dias} dia(s)",
+        "html": html
+    }
+    
+    try:
+        body_json = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=body_json,
+            method='POST',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {RESEND_API_KEY}'
+            }
+        )
+        
+        with urllib.request.urlopen(req) as response:
+            return response.status == 200
+    except:
+        return False
+
+
+def verificar_licencas_vencimento():
+    """
+    Verifica licenças que vencerão em 3 dias
+    Envia email de aviso
+    Esta função deve ser chamada diariamente (ex: via cron job ou agendador)
+    """
+    status_code, licencas = supabase_request("GET", "licencas", {"select": "*"})
+    
+    if status_code != 200 or not licencas:
+        return
+    
+    hoje = datetime.now()
+    
+    for lic in licencas:
+        if not lic:
+            continue
+        
+        try:
+            venc = datetime.fromisoformat(lic.get("data_expiracao", ""))
+            dias = (venc - hoje).days
+            
+            # Se faltam exatamente 3 dias E ainda não enviou email
+            if dias == 3 and not lic.get("email_aviso_enviado"):
+                email = lic.get("email")
+                venc_str = lic.get("data_expiracao")
+                
+                if enviar_email_aviso_vencimento(email, 3, venc_str):
+                    # Marca como enviado
+                    supabase_request("PATCH", "licencas", 
+                        {"id": f"eq.{lic['id']}"}, 
+                        {"email_aviso_enviado": True})
+        except:
+            continue
+
+
+# ============================================================================
+# ADICIONE ISTO AO HANDLER PRINCIPAL (RequestHandler)
+# ============================================================================
+# 
+# No seu do_GET e do_POST, adicione:
+#
+# elif path.startswith("/pagamento/assinatura"):
+#     status, resp = handle_assinatura(path, "POST", body_str)
+#     self.send_response(status)
+#     self.send_header("Content-type", "application/json")
+#     self.end_headers()
+#     self.wfile.write(json.dumps(resp).encode())
+#
+# elif path.startswith("/admin/dashboard"):
+#     status, html = handle_admin_dashboard(path, "GET", "", query_params)
+#     self.send_response(status)
+#     self.send_header("Content-type", "text/html; charset=utf-8")
+#     self.end_headers()
+#     self.wfile.write(html.encode('utf-8'))
+#
+# ============================================================================
