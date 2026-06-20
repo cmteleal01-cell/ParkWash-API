@@ -823,19 +823,6 @@ class APIHandler(BaseHTTPRequestHandler):
 # MAIN
 # ============================================================================
 
-if __name__ == "__main__":
-    if not app_pronto:
-        print("⚠️  AVISO: SUPABASE_URL ou SUPABASE_KEY não configurados — API vai responder erro em rotas de banco.")
-    else:
-        print("✅  Conectado ao Supabase (configuração detectada).")
-
-    server = HTTPServer(("0.0.0.0", 8000), APIHandler)
-    print("🚀 ParkWash API running on http://0.0.0.0:8000")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n✅ Server stopped")
-        server.server_close()
 # ============================================================================
 # ASSINATURA RECORRENTE (R$ 119,90/mês) — ADICIONE ISTO AO SEU main.py
 # ============================================================================
@@ -1231,3 +1218,16 @@ def verificar_licencas_vencimento():
 #     self.wfile.write(html.encode('utf-8'))
 #
 # ============================================================================
+if __name__ == "__main__":
+    if not app_pronto:
+        print("⚠️  AVISO: SUPABASE_URL ou SUPABASE_KEY não configurados — API vai responder erro em rotas de banco.")
+    else:
+        print("✅  Conectado ao Supabase (configuração detectada).")
+
+    server = HTTPServer(("0.0.0.0", 8000), APIHandler)
+    print("🚀 ParkWash API running on http://0.0.0.0:8000")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n✅ Server stopped")
+        server.server_close()
