@@ -41,7 +41,10 @@ def supabase_request(method, table, params=None, body=None, extra_headers=None):
 
     headers = {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        # Nota: chaves novas do Supabase (sb_secret_..., sb_publishable_...)
+        # NÃO são JWT e não devem ir no header Authorization: Bearer — isso
+        # causa erro 403. O gateway do Supabase já traduz o "apikey" para o
+        # papel correto internamente. Só "apikey" é necessário aqui.
         "Content-Type": "application/json",
     }
     if extra_headers:
