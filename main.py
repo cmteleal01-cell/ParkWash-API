@@ -845,6 +845,39 @@ if __name__ == "__main__":
 # ASSINATURA RECORRENTE (R$ 119,90/mês) — ADICIONE ISTO AO SEU main.py
 # ============================================================================
 
+def gerar_tabela_admin_html(licencas):
+    """Gera HTML da tabela de licenças para o admin"""
+    if not licencas:
+        return ""
+    
+    linhas = ""
+    for lic in licencas:
+        email = lic.get("email", "N/A")
+        venc = lic.get("data_expiracao", "N/A")
+        status = lic.get("status", "N/A")
+        
+        linhas += f"""
+        <tr>
+            <td>{email}</td>
+            <td>{venc}</td>
+            <td><strong>{status}</strong></td>
+        </tr>
+        """
+    
+    return f"""
+    <table>
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Data de Vencimento</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>{linhas}</tbody>
+    </table>
+    """
+
+
 def criar_preferencia_recorrente(email_cliente: str):
     """
     Cria preferência de assinatura automática no Mercado Pago
