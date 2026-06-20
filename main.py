@@ -174,6 +174,10 @@ def criar_link_pagamento(nome_cliente, email_cliente, valor):
         "payer": {"email": email_cliente, "name": nome_cliente} if email_cliente else {},
         "notification_url": "https://parkwash-api.onrender.com/webhook/mercadopago",
         "external_reference": referencia,
+        "payment_methods": {
+            "excluded_payment_types": [],
+            "excluded_payment_methods": [],
+        }
     }
 
     status, resultado = mp_request("POST", "/checkout/preferences", body=corpo)
