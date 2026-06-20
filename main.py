@@ -550,6 +550,7 @@ class APIHandler(BaseHTTPRequestHandler):
               outra máquina — é exatamente o que queremos bloquear)
         - Licença não existe -> inválida.
         """
+        print(f"[VALIDATE_LICENSE_CALLED] data={data}")
         mac_address = data.get("mac_address")
         license_key = data.get("license_key")
         if not mac_address or not license_key:
