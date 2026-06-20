@@ -190,11 +190,17 @@ class APIHandler(BaseHTTPRequestHandler):
         if not app_pronto:
             self.send_json({"error": "SUPABASE_URL/SUPABASE_KEY não configurados no Render"}, 500)
             return
-        status, _ = supabase_request("GET", "machines", params={"limit": "1"})
+        status, resultado = supabase_request("GET", "machines", params={"limit": "1"})
         if status in (200, 206):
             self.send_json({"status": "success", "message": "Conexão com Supabase OK", "backend": "supabase"})
         else:
-            self.send_json({"error": f"Falha ao conectar ao Supabase (status {status})"}, 500)
+            self.send_json({
+                "error": f"Falha ao conectar ao Supabase (status {status})",
+                "detalhe_supabase": resultado,
+                "url_usada": f"{SUPABASE_URL}/rest/v1/machines",
+                "chave_configurada": bool(SUPABASE_KEY),
+                "tamanho_chave": len(SUPABASE_KEY) if SUPABASE_KEY else 0,
+            }, 500)
 
     # ------------------------------------------------------------------------
     # LICENCIAMENTO
