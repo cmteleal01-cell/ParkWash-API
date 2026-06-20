@@ -206,38 +206,70 @@ class APIHandler(BaseHTTPRequestHandler):
     # LICENCIAMENTO
     # ------------------------------------------------------------------------
     def validate_license(self, data):
+        """
+        Valida uma licença. mac_address e license_key são ambos obrigatórios
+        no REQUEST do cliente (isso não muda) — mas a regra mudou do lado do
+        servidor:
+
+        - Licença existe e mac_address no banco está VAZIO (licença nunca
+          usada) -> CLAIM: trava essa licença neste mac_address agora,
+          considera válida. Isso é o que permite vender sem saber de
+          antemão qual máquina o cliente vai usar.
+        - Licença existe e mac_address no banco JÁ ESTÁ preenchido:
+            - bate com o mac_address enviado agora -> válida (uso normal)
+            - não bate -> inválida (alguém tentando usar a mesma chave em
+              outra máquina — é exatamente o que queremos bloquear)
+        - Licença não existe -> inválida.
+        """
         mac_address = data.get("mac_address")
         license_key = data.get("license_key")
         if not mac_address or not license_key:
             self.send_json({"error": "Missing mac_address or license_key"}, 400)
             return
 
+        # Busca SÓ por license_key — o mac_address da licença pode ainda
+        # estar vazio (licença nunca usada) ou já ter um dono.
         status, machines = supabase_request("GET", "machines", params={
-            "mac_address": f"eq.{mac_address}",
             "license_key": f"eq.{license_key}",
             "select": "*"
         })
 
-        # Log da tentativa — não bloqueia a resposta se o log falhar
-        try:
-            supabase_request("POST", "validation_logs", body={
-                "mac_address": mac_address,
-                "license_key": license_key,
-                "status": "valid" if (status == 200 and machines) else "invalid"
-            })
-        except Exception:
-            pass
+        licenca_valida = False
+        motivo_log = "invalid"
 
         if status == 200 and machines:
             machine = machines[0]
+            mac_no_banco = machine.get("mac_address")
+
             if not machine.get("active", True):
                 self.send_json({"valid": False, "message": "License is inactive"})
+                self._log_validacao(mac_address, license_key, "inactive")
                 return
 
-            supabase_request("PATCH", "machines",
-                              params={"id": f"eq.{machine['id']}"},
-                              body={"last_check": agora_iso()})
+            if not mac_no_banco:
+                # Primeira vez que essa licença é usada — trava nesta máquina.
+                supabase_request("PATCH", "machines",
+                                  params={"id": f"eq.{machine['id']}"},
+                                  body={"mac_address": mac_address, "last_check": agora_iso()})
+                licenca_valida = True
+                motivo_log = "claimed_first_use"
 
+            elif mac_no_banco == mac_address:
+                # Máquina já era a dona — validação normal do dia a dia.
+                supabase_request("PATCH", "machines",
+                                  params={"id": f"eq.{machine['id']}"},
+                                  body={"last_check": agora_iso()})
+                licenca_valida = True
+                motivo_log = "valid"
+
+            else:
+                # Essa license_key já pertence a OUTRA máquina. Bloqueado.
+                licenca_valida = False
+                motivo_log = "mac_mismatch"
+
+        self._log_validacao(mac_address, license_key, motivo_log)
+
+        if licenca_valida:
             v_status, versions = supabase_request("GET", "versions", params={
                 "is_active": "eq.true", "order": "released_at.desc", "limit": "1", "select": "*"
             })
@@ -251,6 +283,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_json({"valid": True, "message": "License is valid (no new version)"})
         else:
             self.send_json({"valid": False, "message": "Invalid MAC address or license key"})
+
+    def _log_validacao(self, mac_address, license_key, status_str):
+        try:
+            supabase_request("POST", "validation_logs", body={
+                "mac_address": mac_address, "license_key": license_key, "status": status_str
+            })
+        except Exception:
+            pass
 
     def get_latest_version(self):
         status, versions = supabase_request("GET", "versions", params={
@@ -267,24 +307,33 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "No version found"}, 404)
 
     def generate_license(self, data):
-        mac_address = data.get("mac_address")
+        """
+        Gera uma licença nova. mac_address agora é OPCIONAL:
+        - Se informado (uso manual/admin, como antes): licença já nasce
+          travada nessa máquina.
+        - Se omitido (fluxo automático de venda): licença nasce "sem dono"
+          e trava na primeira vez que o cliente ativar — ver validate_license.
+        """
+        mac_address = data.get("mac_address") or None
         client_name = data.get("client_name", "")
-        if not mac_address:
-            self.send_json({"error": "Missing mac_address"}, 400)
-            return
 
-        license_key = hashlib.sha256(f"{mac_address}{uuid.uuid4()}".encode()).hexdigest()[:64]
+        license_key = hashlib.sha256(f"{client_name}{uuid.uuid4()}".encode()).hexdigest()[:64]
+
+        corpo = {"license_key": license_key, "client_name": client_name}
+        if mac_address:
+            corpo["mac_address"] = mac_address
 
         status, result = supabase_request(
-            "POST", "machines",
-            body={"mac_address": mac_address, "license_key": license_key, "client_name": client_name},
+            "POST", "machines", body=corpo,
             extra_headers={"Prefer": "return=representation"}
         )
 
         if status in (200, 201):
             self.send_json({
-                "status": "success", "mac_address": mac_address,
-                "license_key": license_key, "message": "License generated successfully"
+                "status": "success",
+                "mac_address": mac_address,
+                "license_key": license_key,
+                "message": "License generated successfully"
             })
         else:
             self.send_json({"error": f"Erro ao gravar no Supabase (status {status}): {result}"}, 500)
