@@ -906,7 +906,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "payment_id_mp": chave_idem,
             "license_key": license_key,
             "email_comprador": email_comprador,
-            "valor": 119.90,
+            "valor": 1.00,  # ⚠️ TEMPORÁRIO PARA TESTE
         })
 
         email_enviado, detalhe_email = (False, "email_nao_configurado")
@@ -1058,7 +1058,7 @@ def criar_preferencia_recorrente(email_cliente: str):
         "auto_recurring": {
             "frequency": 1,
             "frequency_type": "months",
-            "transaction_amount": 119.90,
+            "transaction_amount": 1.00,  # ⚠️ TEMPORÁRIO PARA TESTE — voltar para 119.90 depois
             "currency_id": "BRL"
         },
         "status": "pending"
