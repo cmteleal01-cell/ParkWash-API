@@ -232,6 +232,23 @@ def buscar_pagamento_mp(payment_id):
     return mp_request("GET", f"/v1/payments/{payment_id}")
 
 
+def buscar_preapproval_mp(preapproval_id):
+    """
+    Busca o registro REAL de uma assinatura (preapproval) na API do MP.
+    Usado quando o cliente cadastra o cartão e autoriza a assinatura.
+    """
+    return mp_request("GET", f"/preapproval/{preapproval_id}")
+
+
+def buscar_authorized_payment_mp(authorized_payment_id):
+    """
+    Busca o registro REAL de uma cobrança recorrente (authorized_payment).
+    Esse objeto contém o preapproval_id que liga essa cobrança mensal
+    à assinatura original.
+    """
+    return mp_request("GET", f"/authorized_payments/{authorized_payment_id}")
+
+
 # ============================================================================
 # RESEND — envio automático de e-mail
 # ============================================================================
@@ -357,7 +374,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
             
             # Busca todas as licencas
-            status_code, licencas = supabase_request("GET", "licencas", {"select": "*"})
+            status_code, licencas = supabase_request("GET", "machines", {"select": "*"})
             
             if status_code != 200 or not licencas:
                 licencas = []
@@ -710,13 +727,17 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def webhook_mercadopago(self, data):
         """
-        Recebido automaticamente pelo Mercado Pago quando o status de um
-        pagamento muda. Fluxo de segurança:
+        Recebido automaticamente pelo Mercado Pago quando algo muda:
+        - topic "payment": venda única (Pix avulso) — fluxo original.
+        - topic "subscription_preapproval": cliente cadastrou cartão e
+          autorizou a assinatura recorrente.
+        - topic "subscription_authorized_payment": uma cobrança mensal
+          específica da assinatura foi processada.
 
+        Fluxo de segurança (igual para os 3 tipos):
         1. Valida a assinatura (x-signature) — rejeita se não vier do MP de fato.
-        2. Busca o pagamento REAL na API do MP (nunca confia só no webhook).
-        3. Se status == "approved" e esse payment_id ainda não foi processado:
-           gera licença sem dono + manda e-mail automático pro comprador.
+        2. Busca o registro REAL na API do MP (nunca confia só no webhook).
+        3. Idempotência via tabela pagamentos_processados.
         4. Sempre responde 200 rápido (MP reenvia se não receber 200).
         """
         print(f"[WEBHOOK] Recebido. path={self.path} body={data}")
@@ -728,6 +749,9 @@ class APIHandler(BaseHTTPRequestHandler):
         data_id = query.get("data.id", [None])[0]
         if not data_id:
             data_id = (data.get("data") or {}).get("id")
+
+        tipo_evento = query.get("type", [None])[0] or data.get("type") or data.get("topic") or "payment"
+        print(f"[WEBHOOK] tipo_evento={tipo_evento}")
 
         x_signature = self.headers.get("x-signature")
         x_request_id = self.headers.get("x-request-id")
@@ -742,6 +766,15 @@ class APIHandler(BaseHTTPRequestHandler):
             print("[WEBHOOK] Sem data_id — descartando.")
             self.send_json({"received": True, "processado": False, "motivo": "sem_payment_id"}, 200)
             return
+
+        # --- Roteamento por tipo de evento ---
+        if "authorized_payment" in tipo_evento:
+            self._tratar_cobranca_recorrente(data_id)
+            return
+        elif "preapproval" in tipo_evento:
+            self._tratar_assinatura_autorizada(data_id)
+            return
+        # else: cai no fluxo original de pagamento único (Pix avulso)
 
         # Idempotência: já processamos esse pagamento antes?
         status_check, ja_processados = supabase_request(
@@ -803,6 +836,150 @@ class APIHandler(BaseHTTPRequestHandler):
             "processado": True,
             "license_key": license_key,
             "email_enviado": email_enviado,
+        }, 200)
+
+
+    def _tratar_assinatura_autorizada(self, preapproval_id):
+        """
+        Chamado quando o tópico do webhook é "subscription_preapproval".
+        Quando o status virar "authorized", o cliente cadastrou o cartão
+        e a assinatura está ativa — geramos a licença e liberamos acesso.
+        """
+        # Idempotência própria desse tipo de evento
+        chave_idem = f"preapproval_{preapproval_id}"
+        status_check, ja_processados = supabase_request(
+            "GET", "pagamentos_processados",
+            params={"payment_id_mp": f"eq.{chave_idem}", "select": "id"}
+        )
+        if status_check == 200 and ja_processados:
+            self.send_json({"received": True, "processado": False, "motivo": "ja_processado_antes"}, 200)
+            return
+
+        status_pre, preapproval = buscar_preapproval_mp(preapproval_id)
+        print(f"[WEBHOOK][preapproval] status_pre={status_pre} preapproval={preapproval}")
+
+        if status_pre != 200 or not preapproval:
+            self.send_json({"received": True, "processado": False, "motivo": "preapproval_nao_encontrado"}, 200)
+            return
+
+        if preapproval.get("status") != "authorized":
+            print(f"[WEBHOOK][preapproval] Status não é authorized: {preapproval.get('status')}")
+            self.send_json({"received": True, "processado": False,
+                             "motivo": f"status_{preapproval.get('status')}"}, 200)
+            return
+
+        email_comprador = preapproval.get("payer_email") or ""
+
+        # Já existe uma máquina/licença vinculada a este preapproval_id?
+        status_existente, existentes = supabase_request(
+            "GET", "machines", params={"preapproval_id": f"eq.{preapproval_id}", "select": "*"}
+        )
+
+        agora = datetime.now()
+        novo_vencimento = (agora.replace(microsecond=0) + __import__("datetime").timedelta(days=30)).isoformat()
+
+        if status_existente == 200 and existentes:
+            # Já existia (ex.: reenvio do webhook) — apenas garante dados atualizados.
+            license_key = existentes[0].get("license_key")
+            supabase_request(
+                "PATCH", "machines",
+                params={"preapproval_id": f"eq.{preapproval_id}"},
+                body={"data_expiracao": novo_vencimento, "status": "ativa", "email": email_comprador}
+            )
+        else:
+            # Primeira autorização — cria a licença sem dono (trava no primeiro uso).
+            license_key = hashlib.sha256(f"{email_comprador}{uuid.uuid4()}".encode()).hexdigest()[:64]
+            supabase_request(
+                "POST", "machines",
+                body={
+                    "license_key": license_key,
+                    "client_name": email_comprador,
+                    "email": email_comprador,
+                    "preapproval_id": preapproval_id,
+                    "data_expiracao": novo_vencimento,
+                    "status": "ativa",
+                },
+                extra_headers={"Prefer": "return=representation"}
+            )
+
+        supabase_request("POST", "pagamentos_processados", body={
+            "payment_id_mp": chave_idem,
+            "license_key": license_key,
+            "email_comprador": email_comprador,
+            "valor": 119.90,
+        })
+
+        email_enviado, detalhe_email = (False, "email_nao_configurado")
+        if email_pronto and email_comprador:
+            email_enviado, detalhe_email = enviar_email_licenca(email_comprador, email_comprador, license_key)
+        print(f"[WEBHOOK][preapproval] E-mail: enviado={email_enviado} detalhe={detalhe_email}")
+
+        self.send_json({
+            "received": True,
+            "processado": True,
+            "license_key": license_key,
+            "email_enviado": email_enviado,
+        }, 200)
+
+    def _tratar_cobranca_recorrente(self, authorized_payment_id):
+        """
+        Chamado quando o tópico do webhook é "subscription_authorized_payment".
+        Cada cobrança mensal da assinatura gera um evento desses — usamos
+        para estender a data_expiracao da licença em +30 dias.
+        """
+        chave_idem = f"authpay_{authorized_payment_id}"
+        status_check, ja_processados = supabase_request(
+            "GET", "pagamentos_processados",
+            params={"payment_id_mp": f"eq.{chave_idem}", "select": "id"}
+        )
+        if status_check == 200 and ja_processados:
+            self.send_json({"received": True, "processado": False, "motivo": "ja_processado_antes"}, 200)
+            return
+
+        status_ap, authorized_payment = buscar_authorized_payment_mp(authorized_payment_id)
+        print(f"[WEBHOOK][authorized_payment] status_ap={status_ap} dados={authorized_payment}")
+
+        if status_ap != 200 or not authorized_payment:
+            self.send_json({"received": True, "processado": False, "motivo": "cobranca_nao_encontrada"}, 200)
+            return
+
+        preapproval_id = authorized_payment.get("preapproval_id")
+        pagamento_interno = authorized_payment.get("payment") or {}
+        status_cobranca = pagamento_interno.get("status") or authorized_payment.get("status")
+
+        if status_cobranca not in ("approved", "processed"):
+            print(f"[WEBHOOK][authorized_payment] Cobrança não aprovada: {status_cobranca}")
+            self.send_json({"received": True, "processado": False,
+                             "motivo": f"status_{status_cobranca}"}, 200)
+            return
+
+        if not preapproval_id:
+            self.send_json({"received": True, "processado": False, "motivo": "sem_preapproval_id"}, 200)
+            return
+
+        agora = datetime.now()
+        novo_vencimento = (agora.replace(microsecond=0) + __import__("datetime").timedelta(days=30)).isoformat()
+
+        status_machine, machine_atualizada = supabase_request(
+            "PATCH", "machines",
+            params={"preapproval_id": f"eq.{preapproval_id}"},
+            body={"data_expiracao": novo_vencimento, "status": "ativa"},
+            extra_headers={"Prefer": "return=representation"}
+        )
+        print(f"[WEBHOOK][authorized_payment] Renovação: status={status_machine} resultado={machine_atualizada}")
+
+        supabase_request("POST", "pagamentos_processados", body={
+            "payment_id_mp": chave_idem,
+            "license_key": (machine_atualizada[0].get("license_key") if machine_atualizada else None),
+            "email_comprador": (machine_atualizada[0].get("email") if machine_atualizada else None),
+            "valor": authorized_payment.get("transaction_amount"),
+        })
+
+        self.send_json({
+            "received": True,
+            "processado": True,
+            "preapproval_id": preapproval_id,
+            "novo_vencimento": novo_vencimento,
         }, 200)
 
 
