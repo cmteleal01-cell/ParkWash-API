@@ -562,6 +562,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "license_key": f"eq.{license_key}",
             "select": "*"
         })
+        
+        # DEBUG
+        print(f"[VALIDATE] license_key={license_key[:16]}... status={status} machines={machines}")
 
         licenca_valida = False
         motivo_log = "invalid"
