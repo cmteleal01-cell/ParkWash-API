@@ -331,8 +331,7 @@ class APIHandler(BaseHTTPRequestHandler):
         # --- Assinatura Recorrente ---
         elif path == "/pagamento/assinatura":
             try:
-                body = json.loads(body_str) if body_str else {}
-                email = body.get("email", "cliente@example.com")
+                email = data.get("email", "cliente@example.com")
                 resultado = criar_preferencia_recorrente(email)
                 self.send_json(resultado, 200)
             except Exception as e:
