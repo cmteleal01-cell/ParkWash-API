@@ -322,6 +322,7 @@ class APIHandler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
         print(f"[POST] {self.path}")
+        print(f"[POST_PATH_EXTRACTED] path={path}")
 
         content_length = int(self.headers.get('Content-Length', 0))
         body_raw = self.rfile.read(content_length).decode('utf-8')
@@ -329,10 +330,13 @@ class APIHandler(BaseHTTPRequestHandler):
             data = json.loads(body_raw) if body_raw else {}
         except Exception:
             data = {}
+        
+        print(f"[POST_DATA] {data}")
 
         if path == "/setup":
             self.testar_conexao_supabase()
         elif path == "/license/validate":
+            print(f"[ROUTE_MATCHED] /license/validate")
             self.validate_license(data)
         elif path == "/admin/generate-license":
             self.require_admin_auth(self.generate_license, data)
