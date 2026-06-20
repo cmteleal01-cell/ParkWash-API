@@ -862,35 +862,34 @@ def gerar_tabela_admin_html(licencas):
 
 def criar_preferencia_recorrente(email_cliente: str):
     """
-    Cria preferência de assinatura automática no Mercado Pago
+    Cria assinatura recorrente REAL no Mercado Pago (cobrança automática via cartão)
+    Usa a API correta: /preapproval (não /checkout/preferences)
     Valor: R$ 119,90/mês
-    Tolerância: 2 dias após vencimento
+    
+    IMPORTANTE: Este modelo cobra via CARTÃO DE CRÉDITO automaticamente.
+    O cliente cadastra o cartão uma vez na tela do Mercado Pago,
+    e a cobrança acontece sozinha todo mês.
     """
     if not MERCADOPAGO_ACCESS_TOKEN:
         return {"erro": "Mercado Pago não configurado"}
     
     payload = {
-        "payer": {"email": email_cliente},
+        "reason": "Park & Wash - Assinatura Mensal",
+        "external_reference": f"parkwash_recorrente_{datetime.now().timestamp()}",
+        "payer_email": email_cliente,
+        "back_url": "https://cmteleal01-cell.github.io/parkwash-landing",
         "auto_recurring": {
             "frequency": 1,
             "frequency_type": "months",
             "transaction_amount": 119.90,
-            "repetitions": 0  # 0 = infinito
+            "currency_id": "BRL"
         },
-        "back_urls": {
-            "success": "https://parkwash-api.onrender.com/pagamento/sucesso",
-            "failure": "https://parkwash-api.onrender.com/pagamento/erro",
-            "pending": "https://parkwash-api.onrender.com/pagamento/pendente"
-        },
-        "notification_url": "https://parkwash-api.onrender.com/webhook/pagamentos",
-        "external_reference": f"parkwash_recorrente_{datetime.now().timestamp()}",
-        "description": "Park & Wash - Gestão de Estacionamentos e Lava-Rápidos"
+        "status": "pending"
     }
     
-    import json
     body_json = json.dumps(payload).encode('utf-8')
     
-    url = "https://api.mercadopago.com/checkout/preferences"
+    url = "https://api.mercadopago.com/preapproval"
     req = urllib.request.Request(
         url,
         data=body_json,
@@ -905,10 +904,14 @@ def criar_preferencia_recorrente(email_cliente: str):
         with urllib.request.urlopen(req) as response:
             dados = json.loads(response.read().decode('utf-8'))
             return {
-                "preference_id": dados.get("id"),
+                "preapproval_id": dados.get("id"),
                 "init_point": dados.get("init_point"),
-                "sandbox_init_point": dados.get("sandbox_init_point")
+                "status": dados.get("status")
             }
+    except urllib.error.HTTPError as e:
+        # Captura o corpo real do erro retornado pelo Mercado Pago
+        corpo_erro = e.read().decode('utf-8')
+        return {"erro": f"Mercado Pago retornou {e.code}", "detalhes": corpo_erro}
     except Exception as e:
         return {"erro": str(e)}
 
