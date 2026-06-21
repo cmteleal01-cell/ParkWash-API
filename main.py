@@ -315,6 +315,14 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"status": "online", "version": "1.0", "database": "supabase" if app_pronto else "not_configured"})
         elif path == "/version/latest":
             self.get_latest_version()
+        elif path == "/debug-log":
+            # Serve o arquivo de log pra debug
+            try:
+                with open('/tmp/parkwash.log', 'r') as f:
+                    content = f.read()
+                self.send_json({"log": content}, 200)
+            except FileNotFoundError:
+                self.send_json({"log": "Arquivo de log não encontrado ainda"}, 200)
         else:
             self.send_json({"error": "Not found"}, 404)
 
