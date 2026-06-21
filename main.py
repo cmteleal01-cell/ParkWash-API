@@ -365,7 +365,8 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/pagamento/assinatura":
             try:
                 email = data.get("email", "cliente@example.com")
-                resultado = criar_preferencia_recorrente(email)
+                valor = data.get("valor", 119.90)  # Padrão R$ 119,90, mas aceita customizado
+                resultado = criar_preferencia_recorrente(email, valor)
                 self.send_json(resultado, 200)
             except Exception as e:
                 self.send_json({"erro": str(e)}, 400)
@@ -1071,11 +1072,11 @@ def gerar_tabela_admin_html(licencas):
     """
 
 
-def criar_preferencia_recorrente(email_cliente: str):
+def criar_preferencia_recorrente(email_cliente: str, valor: float = 119.90):
     """
     Cria assinatura recorrente REAL no Mercado Pago (cobrança automática via cartão)
     Usa a API correta: /preapproval (não /checkout/preferences)
-    Valor: R$ 119,90/mês
+    Valor padrão: R$ 119,90/mês (pode ser customizado)
     
     IMPORTANTE: Este modelo cobra via CARTÃO DE CRÉDITO automaticamente.
     O cliente cadastra o cartão uma vez na tela do Mercado Pago,
@@ -1092,7 +1093,7 @@ def criar_preferencia_recorrente(email_cliente: str):
         "auto_recurring": {
             "frequency": 1,
             "frequency_type": "months",
-            "transaction_amount": 119.90,
+            "transaction_amount": valor,
             "currency_id": "BRL"
         },
         "status": "pending"
