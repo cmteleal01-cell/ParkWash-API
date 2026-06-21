@@ -573,10 +573,17 @@ class APIHandler(BaseHTTPRequestHandler):
 
         # Busca SÓ por license_key — o mac_address da licença pode ainda
         # estar vazio (licença nunca usada) ou já ter um dono.
+        
+        with open('/tmp/parkwash.log', 'a') as f:
+            f.write(f"[VALIDATE_LICENSE] Consultando Supabase com license_key={license_key[:16]}...\n")
+        
         status, machines = supabase_request("GET", "machines", params={
             "license_key": f"eq.{license_key}",
             "select": "*"
         })
+        
+        with open('/tmp/parkwash.log', 'a') as f:
+            f.write(f"[VALIDATE_LICENSE] Resposta Supabase: status={status}, machines={machines}\n")
 
         licenca_valida = False
         motivo_log = "invalid"
