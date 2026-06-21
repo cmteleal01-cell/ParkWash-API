@@ -550,14 +550,15 @@ class APIHandler(BaseHTTPRequestHandler):
               outra máquina — é exatamente o que queremos bloquear)
         - Licença não existe -> inválida.
         """
-        print(f"[VALIDATE_LICENSE] Chamada recebida!")
-        print(f"[VALIDATE_LICENSE] data={data}")
+        # Log em arquivo
+        with open('/tmp/parkwash.log', 'a') as f:
+            f.write(f"[VALIDATE_LICENSE] Chamada! data={data}\n")
         
         mac_address = data.get("mac_address")
         license_key = data.get("license_key")
         
-        print(f"[VALIDATE_LICENSE] license_key={license_key[:16] if license_key else None}...")
-        print(f"[VALIDATE_LICENSE] mac_address={mac_address}")
+        with open('/tmp/parkwash.log', 'a') as f:
+            f.write(f"[VALIDATE_LICENSE] license_key={license_key[:16] if license_key else None}... mac={mac_address}\n")
         if not mac_address or not license_key:
             self.send_json({"error": "Missing mac_address or license_key"}, 400)
             return
