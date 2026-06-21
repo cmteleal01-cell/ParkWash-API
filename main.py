@@ -305,6 +305,14 @@ def enviar_email_licenca(destinatario_email, destinatario_nome, license_key):
 
 class APIHandler(BaseHTTPRequestHandler):
 
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-meli-session-id')
+        self.end_headers()
+
     def do_GET(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
@@ -1011,6 +1019,10 @@ class APIHandler(BaseHTTPRequestHandler):
     def send_json(self, data, status_code=200):
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
+        # CORS headers — permite GitHub Pages chamar a API
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-meli-session-id')
         self.end_headers()
         self.wfile.write(json.dumps(data).encode('utf-8'))
 
