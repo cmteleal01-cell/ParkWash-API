@@ -1,4 +1,4 @@
-import os
+﻿import os
 import uuid
 import hashlib
 import json
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================================
-# CONFIGURAÇÃO
+# CONFIGURAÃ‡ÃƒO
 # ============================================================================
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "change_me_in_production_default_key_123")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -20,33 +20,33 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 app_pronto = bool(SUPABASE_URL and SUPABASE_KEY)
 
-# --- Venda automática (Mercado Pago + e-mail) ------------------------------
+# --- Venda automÃ¡tica (Mercado Pago + e-mail) ------------------------------
 MERCADOPAGO_ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN", "")
 MERCADOPAGO_WEBHOOK_SECRET = os.getenv("MERCADOPAGO_WEBHOOK_SECRET", "")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
-PRODUTO_NOME = "Park & Wash — Licença Mensal"
-PRODUTO_PRECO_PADRAO = 49.90  # ajuste aqui o valor padrão de venda
+PRODUTO_NOME = "Park & Wash â€” LicenÃ§a Mensal"
+PRODUTO_PRECO_PADRAO = 159.90  # ajuste aqui o valor padrÃ£o de venda
 DOWNLOAD_URL_PRODUTO = "https://github.com/cmteleal01-cell/ParkWash-API/releases/download/v1.0.1/PARK_WASH_v1_0_1_Setup.exe"
 
 venda_automatica_pronta = bool(MERCADOPAGO_ACCESS_TOKEN and MERCADOPAGO_WEBHOOK_SECRET)
 email_pronto = bool(RESEND_API_KEY)
 
 # ============================================================================
-# CLIENTE SUPABASE (via REST/PostgREST, só com urllib — zero dependências)
+# CLIENTE SUPABASE (via REST/PostgREST, sÃ³ com urllib â€” zero dependÃªncias)
 # ============================================================================
 
 def supabase_request(method, table, params=None, body=None, extra_headers=None):
     """
-    Faz uma requisição à API REST do Supabase (PostgREST).
+    Faz uma requisiÃ§Ã£o Ã  API REST do Supabase (PostgREST).
 
     params: dict de filtros de query string, ex: {"mac_address": "eq.ABC", "select": "*"}
     body: dict (ou lista de dicts) para POST/PATCH
     Retorna: (status_code, dados_decodificados_ou_None)
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
-        return 0, {"error": "SUPABASE_URL/SUPABASE_KEY não configurados no servidor"}
+        return 0, {"error": "SUPABASE_URL/SUPABASE_KEY nÃ£o configurados no servidor"}
 
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     if params:
@@ -55,9 +55,9 @@ def supabase_request(method, table, params=None, body=None, extra_headers=None):
     headers = {
         "apikey": SUPABASE_KEY,
         # Nota: chaves novas do Supabase (sb_secret_..., sb_publishable_...)
-        # NÃO são JWT e não devem ir no header Authorization: Bearer — isso
-        # causa erro 403. O gateway do Supabase já traduz o "apikey" para o
-        # papel correto internamente. Só "apikey" é necessário aqui.
+        # NÃƒO sÃ£o JWT e nÃ£o devem ir no header Authorization: Bearer â€” isso
+        # causa erro 403. O gateway do Supabase jÃ¡ traduz o "apikey" para o
+        # papel correto internamente. SÃ³ "apikey" Ã© necessÃ¡rio aqui.
         "Content-Type": "application/json",
     }
     if extra_headers:
@@ -85,7 +85,7 @@ def agora_iso():
 
 
 # ============================================================================
-# AUTENTICAÇÃO JWT (sem alteração — não depende de banco de dados)
+# AUTENTICAÃ‡ÃƒO JWT (sem alteraÃ§Ã£o â€” nÃ£o depende de banco de dados)
 # ============================================================================
 
 def generate_admin_token(expires_in=86400):
@@ -129,13 +129,13 @@ def verify_admin_token(token):
 
 
 # ============================================================================
-# MERCADO PAGO — criar link de pagamento, validar webhook, buscar pagamento
+# MERCADO PAGO â€” criar link de pagamento, validar webhook, buscar pagamento
 # ============================================================================
 
 def mp_request(method, path, body=None):
-    """Chamada genérica à API do Mercado Pago, usando o Access Token."""
+    """Chamada genÃ©rica Ã  API do Mercado Pago, usando o Access Token."""
     if not MERCADOPAGO_ACCESS_TOKEN:
-        return 0, {"error": "MERCADOPAGO_ACCESS_TOKEN não configurado"}
+        return 0, {"error": "MERCADOPAGO_ACCESS_TOKEN nÃ£o configurado"}
 
     url = f"https://api.mercadopago.com{path}"
     headers = {
@@ -182,14 +182,14 @@ def criar_link_pagamento(nome_cliente, email_cliente, valor):
 
 def verificar_assinatura_mp(x_signature, x_request_id, data_id):
     """
-    Valida a autenticidade da notificação do Mercado Pago.
+    Valida a autenticidade da notificaÃ§Ã£o do Mercado Pago.
 
     Formato do header x-signature: "ts=1234567890,v1=hash_hex"
     manifest = "id:{data_id};request-id:{x_request_id};ts:{ts};"
     Assinatura esperada = HMAC-SHA256(manifest, MERCADOPAGO_WEBHOOK_SECRET)
 
-    Se isso não bater, a notificação NÃO veio do Mercado Pago — pode ser
-    alguém forjando uma chamada tentando gerar licença de graça.
+    Se isso nÃ£o bater, a notificaÃ§Ã£o NÃƒO veio do Mercado Pago â€” pode ser
+    alguÃ©m forjando uma chamada tentando gerar licenÃ§a de graÃ§a.
     """
     if not x_signature or not MERCADOPAGO_WEBHOOK_SECRET:
         return False
@@ -221,44 +221,44 @@ def verificar_assinatura_mp(x_signature, x_request_id, data_id):
 def buscar_pagamento_mp(payment_id):
     """
     Busca o registro REAL e completo do pagamento na API do Mercado Pago.
-    NUNCA confiamos no corpo do webhook para saber valor/status — só usamos
-    o webhook como um "alguma coisa aconteceu, vá verificar" e sempre
+    NUNCA confiamos no corpo do webhook para saber valor/status â€” sÃ³ usamos
+    o webhook como um "alguma coisa aconteceu, vÃ¡ verificar" e sempre
     confirmamos a verdade direto na fonte.
     """
     return mp_request("GET", f"/v1/payments/{payment_id}")
 
 
 # ============================================================================
-# RESEND — envio automático de e-mail
+# RESEND â€” envio automÃ¡tico de e-mail
 # ============================================================================
 
 def enviar_email_licenca(destinatario_email, destinatario_nome, license_key):
-    """Envia e-mail automático com a chave de licença e o link de download."""
+    """Envia e-mail automÃ¡tico com a chave de licenÃ§a e o link de download."""
     if not RESEND_API_KEY:
-        return False, "RESEND_API_KEY não configurado"
+        return False, "RESEND_API_KEY nÃ£o configurado"
 
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
         <h2 style="color:#2C3E6B;">Bem-vindo ao Park & Wash!</h2>
-        <p>Olá, {destinatario_nome or 'cliente'}!</p>
-        <p>Seu pagamento foi confirmado. Aqui está tudo que você precisa para começar:</p>
+        <p>OlÃ¡, {destinatario_nome or 'cliente'}!</p>
+        <p>Seu pagamento foi confirmado. Aqui estÃ¡ tudo que vocÃª precisa para comeÃ§ar:</p>
         <p><b>1. Baixe o instalador:</b><br>
            <a href="{DOWNLOAD_URL_PRODUTO}">{DOWNLOAD_URL_PRODUTO}</a></p>
-        <p><b>2. Sua chave de licença:</b><br>
+        <p><b>2. Sua chave de licenÃ§a:</b><br>
            <code style="background:#F4F6FB; padding:8px; display:inline-block; border-radius:4px;">{license_key}</code></p>
-        <p>Durante a instalação, quando pedir a chave, cole exatamente o
-           código acima. O manual completo do usuário está incluído
-           automaticamente na instalação (atalho "Manual do Usuário" no
+        <p>Durante a instalaÃ§Ã£o, quando pedir a chave, cole exatamente o
+           cÃ³digo acima. O manual completo do usuÃ¡rio estÃ¡ incluÃ­do
+           automaticamente na instalaÃ§Ã£o (atalho "Manual do UsuÃ¡rio" no
            menu Iniciar, junto com o programa).</p>
-        <p>Qualquer dúvida, é só responder este e-mail.</p>
-        <p style="color:#8FA3B1; font-size:12px;">Victoriae Sumus — Ad Maiora Semper</p>
+        <p>Qualquer dÃºvida, Ã© sÃ³ responder este e-mail.</p>
+        <p style="color:#8FA3B1; font-size:12px;">Victoriae Sumus â€” Ad Maiora Semper</p>
     </div>
     """
 
     corpo = {
         "from": f"Victoriae Sumus <{RESEND_FROM_EMAIL}>",
         "to": [destinatario_email],
-        "subject": "Sua licença Park & Wash chegou! 🅿️",
+        "subject": "Sua licenÃ§a Park & Wash chegou! ðŸ…¿ï¸",
         "html": html,
     }
 
@@ -327,7 +327,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
 
     # ------------------------------------------------------------------------
-    # AUTENTICAÇÃO
+    # AUTENTICAÃ‡ÃƒO
     # ------------------------------------------------------------------------
     def require_admin_auth(self, callback, data):
         auth_header = self.headers.get('Authorization', '')
@@ -352,15 +352,15 @@ class APIHandler(BaseHTTPRequestHandler):
                          "message": "Token generated successfully"})
 
     # ------------------------------------------------------------------------
-    # DIAGNÓSTICO
+    # DIAGNÃ“STICO
     # ------------------------------------------------------------------------
     def testar_conexao_supabase(self):
         if not app_pronto:
-            self.send_json({"error": "SUPABASE_URL/SUPABASE_KEY não configurados no Render"}, 500)
+            self.send_json({"error": "SUPABASE_URL/SUPABASE_KEY nÃ£o configurados no Render"}, 500)
             return
         status, resultado = supabase_request("GET", "machines", params={"limit": "1"})
         if status in (200, 206):
-            self.send_json({"status": "success", "message": "Conexão com Supabase OK", "backend": "supabase"})
+            self.send_json({"status": "success", "message": "ConexÃ£o com Supabase OK", "backend": "supabase"})
         else:
             self.send_json({
                 "error": f"Falha ao conectar ao Supabase (status {status})",
@@ -375,19 +375,19 @@ class APIHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------------
     def validate_license(self, data):
         """
-        Valida uma licença. mac_address e license_key são ambos obrigatórios
-        no REQUEST do cliente (isso não muda) — mas a regra mudou do lado do
+        Valida uma licenÃ§a. mac_address e license_key sÃ£o ambos obrigatÃ³rios
+        no REQUEST do cliente (isso nÃ£o muda) â€” mas a regra mudou do lado do
         servidor:
 
-        - Licença existe e mac_address no banco está VAZIO (licença nunca
-          usada) -> CLAIM: trava essa licença neste mac_address agora,
-          considera válida. Isso é o que permite vender sem saber de
-          antemão qual máquina o cliente vai usar.
-        - Licença existe e mac_address no banco JÁ ESTÁ preenchido:
-            - bate com o mac_address enviado agora -> válida (uso normal)
-            - não bate -> inválida (alguém tentando usar a mesma chave em
-              outra máquina — é exatamente o que queremos bloquear)
-        - Licença não existe -> inválida.
+        - LicenÃ§a existe e mac_address no banco estÃ¡ VAZIO (licenÃ§a nunca
+          usada) -> CLAIM: trava essa licenÃ§a neste mac_address agora,
+          considera vÃ¡lida. Isso Ã© o que permite vender sem saber de
+          antemÃ£o qual mÃ¡quina o cliente vai usar.
+        - LicenÃ§a existe e mac_address no banco JÃ ESTÃ preenchido:
+            - bate com o mac_address enviado agora -> vÃ¡lida (uso normal)
+            - nÃ£o bate -> invÃ¡lida (alguÃ©m tentando usar a mesma chave em
+              outra mÃ¡quina â€” Ã© exatamente o que queremos bloquear)
+        - LicenÃ§a nÃ£o existe -> invÃ¡lida.
         """
         mac_address = data.get("mac_address")
         license_key = data.get("license_key")
@@ -395,8 +395,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Missing mac_address or license_key"}, 400)
             return
 
-        # Busca SÓ por license_key — o mac_address da licença pode ainda
-        # estar vazio (licença nunca usada) ou já ter um dono.
+        # Busca SÃ“ por license_key â€” o mac_address da licenÃ§a pode ainda
+        # estar vazio (licenÃ§a nunca usada) ou jÃ¡ ter um dono.
         status, machines = supabase_request("GET", "machines", params={
             "license_key": f"eq.{license_key}",
             "select": "*"
@@ -415,7 +415,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
 
             if not mac_no_banco:
-                # Primeira vez que essa licença é usada — trava nesta máquina.
+                # Primeira vez que essa licenÃ§a Ã© usada â€” trava nesta mÃ¡quina.
                 supabase_request("PATCH", "machines",
                                   params={"id": f"eq.{machine['id']}"},
                                   body={"mac_address": mac_address, "last_check": agora_iso()})
@@ -423,7 +423,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 motivo_log = "claimed_first_use"
 
             elif mac_no_banco == mac_address:
-                # Máquina já era a dona — validação normal do dia a dia.
+                # MÃ¡quina jÃ¡ era a dona â€” validaÃ§Ã£o normal do dia a dia.
                 supabase_request("PATCH", "machines",
                                   params={"id": f"eq.{machine['id']}"},
                                   body={"last_check": agora_iso()})
@@ -431,7 +431,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 motivo_log = "valid"
 
             else:
-                # Essa license_key já pertence a OUTRA máquina. Bloqueado.
+                # Essa license_key jÃ¡ pertence a OUTRA mÃ¡quina. Bloqueado.
                 licenca_valida = False
                 motivo_log = "mac_mismatch"
 
@@ -476,11 +476,11 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def generate_license(self, data):
         """
-        Gera uma licença nova. mac_address agora é OPCIONAL:
-        - Se informado (uso manual/admin, como antes): licença já nasce
-          travada nessa máquina.
-        - Se omitido (fluxo automático de venda): licença nasce "sem dono"
-          e trava na primeira vez que o cliente ativar — ver validate_license.
+        Gera uma licenÃ§a nova. mac_address agora Ã© OPCIONAL:
+        - Se informado (uso manual/admin, como antes): licenÃ§a jÃ¡ nasce
+          travada nessa mÃ¡quina.
+        - Se omitido (fluxo automÃ¡tico de venda): licenÃ§a nasce "sem dono"
+          e trava na primeira vez que o cliente ativar â€” ver validate_license.
         """
         mac_address = data.get("mac_address") or None
         client_name = data.get("client_name", "")
@@ -527,16 +527,16 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": f"Erro ao gravar no Supabase (status {status}): {result}"}, 500)
 
     # ------------------------------------------------------------------------
-    # VENDA AUTOMÁTICA — Mercado Pago + e-mail
+    # VENDA AUTOMÃTICA â€” Mercado Pago + e-mail
     # ------------------------------------------------------------------------
     def criar_link_pagamento_endpoint(self, data):
         """
         ADMIN: gera um link de pagamento (Checkout Pro) para mandar a um
-        lead por WhatsApp/Instagram. Não gera licença ainda — isso só
+        lead por WhatsApp/Instagram. NÃ£o gera licenÃ§a ainda â€” isso sÃ³
         acontece quando o pagamento for confirmado, via webhook.
         """
         if not venda_automatica_pronta:
-            self.send_json({"error": "Mercado Pago não configurado no servidor "
+            self.send_json({"error": "Mercado Pago nÃ£o configurado no servidor "
                                        "(faltam MERCADOPAGO_ACCESS_TOKEN/MERCADOPAGO_WEBHOOK_SECRET)"}, 500)
             return
 
@@ -557,9 +557,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 "link_pagamento_teste": resultado.get("sandbox_init_point"),
                 "external_reference": referencia,
                 "valor": valor,
-                "message": "Envie o link_pagamento para o cliente. A licença será "
-                           "gerada e enviada por e-mail automaticamente após a "
-                           "confirmação do pagamento."
+                "message": "Envie o link_pagamento para o cliente. A licenÃ§a serÃ¡ "
+                           "gerada e enviada por e-mail automaticamente apÃ³s a "
+                           "confirmaÃ§Ã£o do pagamento."
             })
         else:
             self.send_json({"error": f"Erro ao criar link no Mercado Pago: {resultado}"}, 500)
@@ -567,13 +567,13 @@ class APIHandler(BaseHTTPRequestHandler):
     def webhook_mercadopago(self, data):
         """
         Recebido automaticamente pelo Mercado Pago quando o status de um
-        pagamento muda. Fluxo de segurança:
+        pagamento muda. Fluxo de seguranÃ§a:
 
-        1. Valida a assinatura (x-signature) — rejeita se não vier do MP de fato.
-        2. Busca o pagamento REAL na API do MP (nunca confia só no webhook).
-        3. Se status == "approved" e esse payment_id ainda não foi processado:
-           gera licença sem dono + manda e-mail automático pro comprador.
-        4. Sempre responde 200 rápido (MP reenvia se não receber 200).
+        1. Valida a assinatura (x-signature) â€” rejeita se nÃ£o vier do MP de fato.
+        2. Busca o pagamento REAL na API do MP (nunca confia sÃ³ no webhook).
+        3. Se status == "approved" e esse payment_id ainda nÃ£o foi processado:
+           gera licenÃ§a sem dono + manda e-mail automÃ¡tico pro comprador.
+        4. Sempre responde 200 rÃ¡pido (MP reenvia se nÃ£o receber 200).
         """
         print(f"[WEBHOOK] Recebido. path={self.path} body={data}")
 
@@ -590,26 +590,26 @@ class APIHandler(BaseHTTPRequestHandler):
         print(f"[WEBHOOK] data_id={data_id} x_signature={x_signature} x_request_id={x_request_id}")
 
         if not verificar_assinatura_mp(x_signature, x_request_id, data_id):
-            print("[WEBHOOK] Assinatura INVÁLIDA — descartando.")
+            print("[WEBHOOK] Assinatura INVÃLIDA â€” descartando.")
             self.send_json({"received": True, "processado": False, "motivo": "assinatura_invalida"}, 200)
             return
 
         if not data_id:
-            print("[WEBHOOK] Sem data_id — descartando.")
+            print("[WEBHOOK] Sem data_id â€” descartando.")
             self.send_json({"received": True, "processado": False, "motivo": "sem_payment_id"}, 200)
             return
 
-        # Idempotência: já processamos esse pagamento antes?
+        # IdempotÃªncia: jÃ¡ processamos esse pagamento antes?
         status_check, ja_processados = supabase_request(
             "GET", "pagamentos_processados",
             params={"payment_id_mp": f"eq.{data_id}", "select": "id"}
         )
-        print(f"[WEBHOOK] Checagem idempotência: status={status_check} ja_processados={ja_processados}")
+        print(f"[WEBHOOK] Checagem idempotÃªncia: status={status_check} ja_processados={ja_processados}")
         if status_check == 200 and ja_processados:
             self.send_json({"received": True, "processado": False, "motivo": "ja_processado_antes"}, 200)
             return
 
-        # Busca o registro REAL do pagamento — fonte da verdade.
+        # Busca o registro REAL do pagamento â€” fonte da verdade.
         status_pag, pagamento = buscar_pagamento_mp(data_id)
         print(f"[WEBHOOK] Pagamento real consultado: status_pag={status_pag} pagamento={pagamento}")
 
@@ -618,7 +618,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if pagamento.get("status") != "approved":
-            print(f"[WEBHOOK] Status não é approved: {pagamento.get('status')}")
+            print(f"[WEBHOOK] Status nÃ£o Ã© approved: {pagamento.get('status')}")
             self.send_json({"received": True, "processado": False,
                              "motivo": f"status_{pagamento.get('status')}"}, 200)
             return
@@ -628,17 +628,17 @@ class APIHandler(BaseHTTPRequestHandler):
         nome_comprador = " ".join(filter(None, [payer.get("first_name"), payer.get("last_name")])).strip()
         valor_pago = pagamento.get("transaction_amount")
 
-        # Gera a licença — sem mac_address, trava no primeiro uso real.
+        # Gera a licenÃ§a â€” sem mac_address, trava no primeiro uso real.
         license_key = hashlib.sha256(f"{email_comprador}{uuid.uuid4()}".encode()).hexdigest()[:64]
         status_lic, resultado_lic = supabase_request(
             "POST", "machines",
             body={"license_key": license_key, "client_name": nome_comprador or email_comprador},
             extra_headers={"Prefer": "return=representation"}
         )
-        print(f"[WEBHOOK] Licença criada: status={status_lic} resultado={resultado_lic}")
+        print(f"[WEBHOOK] LicenÃ§a criada: status={status_lic} resultado={resultado_lic}")
 
-        # Registra que esse pagamento já foi processado (evita duplicar se o
-        # Mercado Pago reenviar a mesma notificação).
+        # Registra que esse pagamento jÃ¡ foi processado (evita duplicar se o
+        # Mercado Pago reenviar a mesma notificaÃ§Ã£o).
         supabase_request("POST", "pagamentos_processados", body={
             "payment_id_mp": str(data_id),
             "license_key": license_key,
@@ -646,9 +646,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "valor": valor_pago,
         })
 
-        # Envia o e-mail automático — se falhar, registramos mas não
-        # quebramos a resposta ao Mercado Pago (o pagamento já foi processado
-        # e a licença já existe; o e-mail pode ser reenviado manualmente).
+        # Envia o e-mail automÃ¡tico â€” se falhar, registramos mas nÃ£o
+        # quebramos a resposta ao Mercado Pago (o pagamento jÃ¡ foi processado
+        # e a licenÃ§a jÃ¡ existe; o e-mail pode ser reenviado manualmente).
         email_enviado, detalhe_email = (False, "email_nao_configurado")
         if email_pronto and email_comprador:
             email_enviado, detalhe_email = enviar_email_licenca(email_comprador, nome_comprador, license_key)
@@ -681,14 +681,15 @@ class APIHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     if not app_pronto:
-        print("⚠️  AVISO: SUPABASE_URL ou SUPABASE_KEY não configurados — API vai responder erro em rotas de banco.")
+        print("âš ï¸  AVISO: SUPABASE_URL ou SUPABASE_KEY nÃ£o configurados â€” API vai responder erro em rotas de banco.")
     else:
-        print("✅  Conectado ao Supabase (configuração detectada).")
+        print("âœ…  Conectado ao Supabase (configuraÃ§Ã£o detectada).")
 
     server = HTTPServer(("0.0.0.0", 8000), APIHandler)
-    print("🚀 ParkWash API running on http://0.0.0.0:8000")
+    print("ðŸš€ ParkWash API running on http://0.0.0.0:8000")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n✅ Server stopped")
+        print("\nâœ… Server stopped")
         server.server_close()
+
