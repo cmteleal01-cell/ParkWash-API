@@ -28,7 +28,7 @@ RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
 PRODUTO_NOME = "Park & Wash — Assinatura Mensal"
 PRODUTO_PRECO_PADRAO = 159.90  # valor padrão de venda — único lugar que precisa mudar pra ajustar preço
-DOWNLOAD_URL_PRODUTO = "https://github.com/cmteleal01-cell/ParkWash-API/releases/download/v1.0.4/PARK_WASH_v1_0_4_Setup.exe"
+DOWNLOAD_URL_PRODUTO = "https://github.com/cmteleal01-cell/ParkWash-API/releases/download/v1.0.1/ParkWash_Setup.exe"
 
 venda_automatica_pronta = bool(MERCADOPAGO_ACCESS_TOKEN and MERCADOPAGO_WEBHOOK_SECRET)
 email_pronto = bool(RESEND_API_KEY)
