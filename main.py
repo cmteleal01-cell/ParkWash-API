@@ -409,6 +409,9 @@ class APIHandler(BaseHTTPRequestHandler):
             self.require_admin_auth(self.generate_license, data)
         elif path == "/admin/add-version":
             self.require_admin_auth(self.add_version, data)
+        elif path == "/admin/test-email":
+            self._handle_test_email()
+            self._handle_test_email()
         elif path == "/admin/generate-token":
             self.generate_token_endpoint(data)
         elif path == "/admin/criar-link-pagamento":
