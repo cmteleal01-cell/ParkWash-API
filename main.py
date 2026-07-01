@@ -374,6 +374,19 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-meli-session-id')
         self.end_headers()
 
+    def _handle_test_email(self):
+        token = self._verificar_token_admin()
+        if not token:
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length)) if length else {}
+        dest = data.get("destinatario", "")
+        if not dest:
+            self.send_json({"error": "destinatario obrigatorio"}, 400)
+            return
+        ok, detalhe = enviar_email_licenca(dest, "Teste", "CHAVE-DE-TESTE-123")
+        self.send_json({"enviado": ok, "detalhe": str(detalhe)})
+
     def do_GET(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
