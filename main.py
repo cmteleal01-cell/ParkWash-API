@@ -451,8 +451,32 @@ class APIHandler(BaseHTTPRequestHandler):
         if not dest:
             self.send_json({"error": "destinatario obrigatorio"}, 400)
             return
-        ok, detalhe = enviar_email_licenca(dest, "Teste", "CHAVE-DE-TESTE-123")
-        self.send_json({"enviado": ok, "detalhe": str(detalhe)})
+        # Email simples sem caracteres especiais para teste
+        corpo = {
+            "from": f"Park Wash <{RESEND_FROM_EMAIL}>",
+            "to": [dest],
+            "subject": "Teste Park Wash",
+            "html": "<p>Teste de email automatico Park Wash. Se chegou, esta funcionando!</p>",
+        }
+        url = "https://api.resend.com/emails"
+        headers_resend = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        import json as _json
+        import urllib.request as _req
+        import urllib.error as _err
+        data_bytes = _json.dumps(corpo).encode("utf-8")
+        req = _req.Request(url, data=data_bytes, headers=headers_resend, method="POST")
+        try:
+            with _req.urlopen(req, timeout=10) as resp:
+                resultado = _json.loads(resp.read().decode("utf-8"))
+                self.send_json({"enviado": True, "detalhe": str(resultado)})
+        except _err.HTTPError as e:
+            erro = e.read().decode("utf-8")
+            self.send_json({"enviado": False, "detalhe": erro, "status": e.code})
+        except Exception as e:
+            self.send_json({"enviado": False, "detalhe": str(e)})
 
     def generate_token_endpoint(self, data):
         secret = data.get("secret_key", "")
