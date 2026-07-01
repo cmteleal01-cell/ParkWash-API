@@ -348,6 +348,7 @@ def enviar_email_licenca(destinatario_email, destinatario_nome, license_key):
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY}",
         "Content-Type": "application/json",
+        "User-Agent": "ParkWash/1.0",
     }
     data = json.dumps(corpo).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -462,6 +463,7 @@ class APIHandler(BaseHTTPRequestHandler):
         headers_resend = {
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "ParkWash/1.0",
         }
         import json as _json
         import urllib.request as _req
