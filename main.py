@@ -409,6 +409,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self.require_admin_auth(self.generate_license, data)
         elif path == "/admin/add-version":
             self.require_admin_auth(self.add_version, data)
+        elif path == "/admin/diagnostico-email":
+            self.diagnostico_email({})
         elif path == "/admin/test-email":
             self.require_admin_auth(self.test_email_endpoint, data)
         elif path == "/admin/generate-token":
@@ -436,6 +438,13 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": f"Authentication failed: {result}"}, 401)
             return
         callback(data)
+
+    def diagnostico_email(self, data):
+        self.send_json({
+            "resend_from": RESEND_FROM_EMAIL,
+            "resend_key_len": len(RESEND_API_KEY),
+            "email_pronto": email_pronto
+        })
 
     def test_email_endpoint(self, data):
         dest = data.get("destinatario", "")
